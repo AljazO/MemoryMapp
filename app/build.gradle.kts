@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "si.uni_lj.fe.tnuv.memorymapp"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "si.uni_lj.fe.tnuv.memorymapp"
