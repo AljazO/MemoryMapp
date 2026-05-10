@@ -26,19 +26,22 @@ fun Modifier.verticalScrollbar(
     val scope = rememberCoroutineScope()
     var isScrolledRecently by remember { mutableStateOf(false) }
     
-    LaunchedEffect(state.value, state.isScrollInProgress) {
-        if (state.isScrollInProgress || state.value > 0) {
+    val isScrollInProgress by remember { derivedStateOf { state.isScrollInProgress } }
+    val scrollValueState by remember { derivedStateOf { state.value } }
+
+    LaunchedEffect(scrollValueState, isScrollInProgress) {
+        if (isScrollInProgress || scrollValueState > 0) {
             isScrolledRecently = true
             delay(2000)
-            if (!state.isScrollInProgress) {
+            if (!isScrollInProgress) {
                 isScrolledRecently = false
             }
         }
     }
 
     val alpha by animateFloatAsState(
-        targetValue = if (state.isScrollInProgress || isScrolledRecently) 1f else 0f,
-        animationSpec = tween(durationMillis = if (state.isScrollInProgress) 150 else 500),
+        targetValue = if (isScrollInProgress || isScrolledRecently) 1f else 0f,
+        animationSpec = tween(durationMillis = if (isScrollInProgress) 150 else 500),
         label = "scrollbar_alpha"
     )
 
@@ -63,11 +66,9 @@ fun Modifier.verticalScrollbar(
     }.pointerInput(state.maxValue) {
         if (state.maxValue > 0) {
             detectDragGestures(
-                onDragStart = { offset ->
-                    // Optional: only start if clicking near the right edge
-                },
+                onDragStart = { _ -> },
                 onDrag = { change, dragAmount ->
-                    if (change.position.x >= size.width - width.toPx() * 3) { // Wider hit area for touch
+                    if (change.position.x >= size.width - width.toPx() * 3) {
                         val visibleHeight = size.height
                         val totalHeight = state.maxValue + visibleHeight
                         val delta = (dragAmount.y / visibleHeight) * totalHeight
@@ -90,17 +91,21 @@ fun Modifier.verticalScrollbar(
     val scope = rememberCoroutineScope()
     var isScrolledRecently by remember { mutableStateOf(false) }
     
-    LaunchedEffect(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, state.isScrollInProgress) {
+    val isScrollInProgress by remember { derivedStateOf { state.isScrollInProgress } }
+    val firstVisibleItemIndex by remember { derivedStateOf { state.firstVisibleItemIndex } }
+    val firstVisibleItemScrollOffset by remember { derivedStateOf { state.firstVisibleItemScrollOffset } }
+
+    LaunchedEffect(firstVisibleItemIndex, firstVisibleItemScrollOffset, isScrollInProgress) {
         isScrolledRecently = true
         delay(2000)
-        if (!state.isScrollInProgress) {
+        if (!isScrollInProgress) {
             isScrolledRecently = false
         }
     }
 
     val alpha by animateFloatAsState(
-        targetValue = if (state.isScrollInProgress || isScrolledRecently) 1f else 0f,
-        animationSpec = tween(durationMillis = if (state.isScrollInProgress) 150 else 500),
+        targetValue = if (isScrollInProgress || isScrolledRecently) 1f else 0f,
+        animationSpec = tween(durationMillis = if (isScrollInProgress) 150 else 500),
         label = "scrollbar_alpha"
     )
 
@@ -115,12 +120,8 @@ fun Modifier.verticalScrollbar(
             
             if (visibleItemsCount < totalItemsCount) {
                 val scrollbarHeight = (visibleItemsCount.toFloat() / totalItemsCount) * size.height
-                val firstVisibleItemIndex = state.firstVisibleItemIndex
-                val firstVisibleItemOffset = state.firstVisibleItemScrollOffset
-                
-                val estimatedTotalHeight = (size.height / visibleItemsCount) * totalItemsCount
-                val scrollbarOffsetY = (firstVisibleItemIndex.toFloat() / totalItemsCount) * size.height + 
-                    (firstVisibleItemOffset.toFloat() / estimatedTotalHeight) * size.height
+                val scrollbarOffsetY = (state.firstVisibleItemIndex.toFloat() / totalItemsCount) * size.height + 
+                    (state.firstVisibleItemScrollOffset.toFloat() / (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) * (size.height / totalItemsCount))
 
                 drawRect(
                     color = Color.White.copy(alpha = alpha * 0.6f),

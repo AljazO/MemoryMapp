@@ -46,6 +46,7 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.platform.LocalLocale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,7 +56,6 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
     
     // State for tracking
     val pathPoints = remember { mutableStateListOf<LatLng>() }
-    var isTracking by remember { mutableStateOf(true) }
     
     // Slider state
     val calendar = Calendar.getInstance()
@@ -260,7 +260,7 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
                 ) {
                     val hours = (sliderValue / 60).toInt()
                     val minutes = (sliderValue % 60).toInt()
-                    val timeString = String.format(Locale.getDefault(), "%02d:%02d", hours, minutes)
+                    val timeString = String.format(LocalLocale.current.platformLocale, "%02d:%02d", hours, minutes)
                     
                     Row(
                         modifier = Modifier.fillMaxWidth(),
