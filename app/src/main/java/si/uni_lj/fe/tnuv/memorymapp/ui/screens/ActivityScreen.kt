@@ -41,27 +41,49 @@ import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import androidx.compose.runtime.collectAsState
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
 import java.util.*
+import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
+import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 import androidx.compose.ui.platform.LocalLocale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityScreen(onMenuClick: () -> Unit) {
+fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // State for tracking
-    val pathPoints = remember { mutableStateListOf<LatLng>() }
+    // Database and DAO
+    val database = remember { AppDatabase.getDatabase(context) }
+    val locationDao = database.locationDao()
+    
+    // Path points from database
+    val calendarToday = Calendar.getInstance()
+    calendarToday.set(Calendar.HOUR_OF_DAY, 0)
+    calendarToday.set(Calendar.MINUTE, 0)
+    calendarToday.set(Calendar.SECOND, 0)
+    calendarToday.set(Calendar.MILLISECOND, 0)
+    val startOfDay = calendarToday.timeInMillis
+    
+    val allTodayPoints by locationDao.getPointsInRange(startOfDay, startOfDay + 86400000)
+        .collectAsState(initial = emptyList())
     
     // Slider state
-    val calendar = Calendar.getInstance()
-    val initialMinutes = (calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)).toFloat()
-    var currentMinutesOfDay by remember { mutableStateOf(initialMinutes) }
-    var sliderValue by remember { mutableStateOf(initialMinutes) }
+    val calendarNow = Calendar.getInstance()
+    val initialMinutes = (calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()
+    var currentMinutesOfDay by remember { mutableFloatStateOf(initialMinutes) }
+    var sliderValue by remember { mutableFloatStateOf(initialMinutes) }
+    
+    // Filter points based on slider
+    val filteredPathPoints = remember(allTodayPoints, sliderValue) {
+        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
+        allTodayPoints.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+    }
     
     LaunchedEffect(Unit) {
         while(true) {
@@ -105,39 +127,31 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
+    // Initial center on current location
     LaunchedEffect(hasLocationPermission) {
-        if (hasLocationPermission) {
+        if (hasLocationPermission && !hasCentredOnce) {
             fusedLocationClient.lastLocation.addOnSuccessListener { location ->
                 location?.let {
-                    if (!hasCentredOnce) {
-                        val startLatLng = LatLng(it.latitude, it.longitude)
-                        scope.launch {
-                            cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(startLatLng, 15f))
-                            hasCentredOnce = true
-                        }
+                    val startLatLng = LatLng(it.latitude, it.longitude)
+                    scope.launch {
+                        cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(startLatLng, 15f))
+                        hasCentredOnce = true
                     }
                 }
             }
-            
-            startLocationUpdates(fusedLocationClient, { location ->
-                val newLatLng = LatLng(location.latitude, location.longitude)
-                pathPoints.add(newLatLng)
-                
-                if (!isUserInteracting) {
-                    scope.launch {
-                        if (!hasCentredOnce) {
-                            cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(newLatLng, 15f))
-                            hasCentredOnce = true
-                        } else {
-                            cameraPositionState.animate(CameraUpdateFactory.newLatLng(newLatLng))
-                        }
-                    }
-                }
-            })
-        } else {
+        } else if (!hasLocationPermission) {
             permissionLauncher.launch(
                 arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
             )
+        }
+    }
+
+    // Auto-follow current location if tracking and not interacting
+    LaunchedEffect(allTodayPoints, isUserInteracting, isTracking) {
+        if (isTracking && !isUserInteracting && allTodayPoints.isNotEmpty()) {
+            val lastPoint = allTodayPoints.last()
+            val lastLatLng = LatLng(lastPoint.latitude, lastPoint.longitude)
+            cameraPositionState.animate(CameraUpdateFactory.newLatLng(lastLatLng))
         }
     }
 
@@ -152,14 +166,14 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
     ) { innerPadding ->
         Box(
             modifier = Modifier
-                .padding(innerPadding)
+                .padding(top = innerPadding.calculateTopPadding())
                 .fillMaxSize()
         ) {
             // Map Container
             Card(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
                 shape = RoundedCornerShape(32.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.LightGray)
             ) {
@@ -183,9 +197,9 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
                         uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true),
                         properties = MapProperties(isMyLocationEnabled = hasLocationPermission)
                     ) {
-                        if (pathPoints.isNotEmpty()) {
+                        if (filteredPathPoints.isNotEmpty()) {
                             Polyline(
-                                points = pathPoints,
+                                points = filteredPathPoints,
                                 color = Color(0xFF4A90E2),
                                 width = 10f
                             )
@@ -217,7 +231,7 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 32.dp)
+                    .padding(bottom = 100.dp)
             ) {
                 Surface(
                     color = Color.Black.copy(alpha = 0.7f),
@@ -248,7 +262,7 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 32.dp, vertical = 80.dp)
+                    .padding(horizontal = 32.dp, vertical = 8.dp)
                     .fillMaxWidth()
                     .height(84.dp),
                 shape = RoundedCornerShape(20.dp),
@@ -272,7 +286,7 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(timeString, color = Color(0xFF6E6EF7), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             IconButton(
-                                onClick = { sliderValue = currentMinutesOfDay },
+                                onClick = { sliderValue = initialMinutes },
                                 modifier = Modifier.size(24.dp).padding(start = 4.dp)
                             ) {
                                 Icon(
@@ -317,7 +331,8 @@ fun ActivityScreen(onMenuClick: () -> Unit) {
                     StatisticsWindow(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
+                            .padding(bottom = 0.dp, start = 16.dp, end = 16.dp)
+                            .clickable(enabled = false) { }, // Prevent clicks inside from closing
                         onClose = { showStatistics = false }
                     )
                 }
@@ -591,30 +606,6 @@ fun ActivityTopBar(onMenuClick: () -> Unit, onCalendarClick: () -> Unit) {
             Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = "Calendar", tint = Color.White, modifier = Modifier.size(28.dp))
         }
     }
-}
-
-@SuppressLint("MissingPermission")
-private fun startLocationUpdates(
-    fusedLocationClient: FusedLocationProviderClient,
-    onLocationReceived: (android.location.Location) -> Unit
-) {
-    val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-        .setMinUpdateIntervalMillis(2000)
-        .build()
-
-    val locationCallback = object : LocationCallback() {
-        override fun onLocationResult(locationResult: LocationResult) {
-            for (location in locationResult.locations) {
-                onLocationReceived(location)
-            }
-        }
-    }
-
-    fusedLocationClient.requestLocationUpdates(
-        locationRequest,
-        locationCallback,
-        Looper.getMainLooper()
-    )
 }
 
 @Composable

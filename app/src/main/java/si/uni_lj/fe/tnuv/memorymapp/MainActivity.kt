@@ -26,6 +26,16 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.screens.*
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.MemoryMappTheme
 
+import android.content.Intent
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import si.uni_lj.fe.tnuv.memorymapp.service.LocationService
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,6 +50,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MemoryMappApp() {
+    val context = LocalContext.current
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -47,7 +58,34 @@ fun MemoryMappApp() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     
-    var isTracking by remember { mutableStateOf(true) }
+    var isTracking by remember { mutableStateOf(false) } // Default to false, let service handle it
+
+    // Handle Notification Permission for Android 13+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    // Start/Stop Service based on tracking state
+    LaunchedEffect(isTracking) {
+        val intent = Intent(context, LocationService::class.java)
+        if (isTracking) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } else {
+            context.stopService(intent)
+        }
+    }
 
     // Close drawer when route changes to prevent it from starting open on new screens
     LaunchedEffect(currentRoute) {
@@ -130,7 +168,10 @@ fun MemoryMappApp() {
                     )
                 }
                 composable("activity") {
-                    ActivityScreen(onMenuClick = { scope.launch { drawerState.open() } })
+                    ActivityScreen(
+                        onMenuClick = { scope.launch { drawerState.open() } },
+                        isTracking = isTracking
+                    )
                 }
                 composable("memories") {
                     MemoriesScreen(onMenuClick = { scope.launch { drawerState.open() } })
