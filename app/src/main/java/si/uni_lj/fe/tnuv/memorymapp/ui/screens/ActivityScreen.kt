@@ -48,6 +48,11 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.*
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 import androidx.compose.ui.platform.LocalLocale
@@ -57,11 +62,11 @@ import androidx.compose.ui.platform.LocalLocale
 fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+
     // Database and DAO
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
-    
+
     // Path points from database
     val calendarToday = Calendar.getInstance()
     calendarToday.set(Calendar.HOUR_OF_DAY, 0)
@@ -69,22 +74,35 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
     calendarToday.set(Calendar.SECOND, 0)
     calendarToday.set(Calendar.MILLISECOND, 0)
     val startOfDay = calendarToday.timeInMillis
-    
+
     val allTodayPoints by locationDao.getPointsInRange(startOfDay, startOfDay + 86400000)
         .collectAsState(initial = emptyList())
-    
+
     // Slider state
     val calendarNow = Calendar.getInstance()
     val initialMinutes = (calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()
     var currentMinutesOfDay by remember { mutableFloatStateOf(initialMinutes) }
     var sliderValue by remember { mutableFloatStateOf(initialMinutes) }
-    
+
     // Filter points based on slider
-    val filteredPathPoints = remember(allTodayPoints, sliderValue) {
+    val pastPathPoints = remember(allTodayPoints, sliderValue) {
         val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
         allTodayPoints.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
     }
-    
+
+    val futurePathPoints = remember(allTodayPoints, sliderValue) {
+        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
+        allTodayPoints.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+    }
+
+    val historyIndicatorPosition = remember(pastPathPoints) {
+        pastPathPoints.lastOrNull()
+    }
+
+    val isLiveTime = remember(sliderValue, currentMinutesOfDay) {
+        Math.abs(sliderValue - currentMinutesOfDay) < 1.0f
+    }
+
     LaunchedEffect(Unit) {
         while(true) {
             val c = Calendar.getInstance()
@@ -95,7 +113,10 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
 
     var showCalendar by remember { mutableStateOf(false) }
     var showStatistics by remember { mutableStateOf(false) }
-    
+    var showTimeEntry by remember { mutableStateOf(false) }
+    var hourInput by remember { mutableStateOf("") }
+    var minuteInput by remember { mutableStateOf("") }
+
     var isUserInteracting by remember { mutableStateOf(false) }
     var hasCentredOnce by remember { mutableStateOf(false) }
 
@@ -197,11 +218,32 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                         uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true),
                         properties = MapProperties(isMyLocationEnabled = hasLocationPermission)
                     ) {
-                        if (filteredPathPoints.isNotEmpty()) {
+                        // Future/Ghost Path (Lighter)
+                        if (futurePathPoints.isNotEmpty()) {
                             Polyline(
-                                points = filteredPathPoints,
+                                points = futurePathPoints,
+                                color = Color(0xFF4A90E2).copy(alpha = 0.3f),
+                                width = 10f
+                            )
+                        }
+
+                        // Past Path (Solid)
+                        if (pastPathPoints.isNotEmpty()) {
+                            Polyline(
+                                points = pastPathPoints,
                                 color = Color(0xFF4A90E2),
                                 width = 10f
+                            )
+                        }
+
+                        // History Indicator
+                        if (historyIndicatorPosition != null && !isLiveTime) {
+                            Circle(
+                                center = historyIndicatorPosition,
+                                radius = 15.0,
+                                fillColor = Color(0xFF4A90E2),
+                                strokeColor = Color.White,
+                                strokeWidth = 2f
                             )
                         }
                     }
@@ -231,7 +273,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 100.dp)
+                    .padding(bottom = 12.dp) // Lowered more
             ) {
                 Surface(
                     color = Color.Black.copy(alpha = 0.7f),
@@ -258,55 +300,217 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                 }
             }
 
-            // Time slider bar
+            // Time slider bar (Restored Card with background, slimmed down)
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 32.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 70.dp)
                     .fillMaxWidth()
-                    .height(84.dp),
+                    .height(106.dp), // Slimmed to fit 00:00 and 24:00 better
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f))
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxSize().offset(y = (-8).dp).padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
                     val hours = (sliderValue / 60).toInt()
                     val minutes = (sliderValue % 60).toInt()
                     val timeString = String.format(LocalLocale.current.platformLocale, "%02d:%02d", hours, minutes)
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("00:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                        
+                        // Left buttons
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(timeString, color = Color(0xFF6E6EF7), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            IconButton(
-                                onClick = { sliderValue = initialMinutes },
-                                modifier = Modifier.size(24.dp).padding(start = 4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Restore,
-                                    contentDescription = "Reset to current time",
-                                    tint = Color(0xFF6E6EF7),
-                                    modifier = Modifier.size(16.dp)
-                                )
+                            TimeAdjustmentButton("-1H") {
+                                sliderValue = (sliderValue - 60).coerceAtLeast(0f)
+                            }
+                            TimeAdjustmentButton("-1M") {
+                                sliderValue = (sliderValue - 1).coerceAtLeast(0f)
                             }
                         }
-                        
-                        Text("24:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+
+                        // Center Time and Reset
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        timeString,
+                                        color = Color(0xFF6E6EF7),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.clickable {
+                                            hourInput = "%02d".format(hours)
+                                            minuteInput = "%02d".format(minutes)
+                                            showTimeEntry = true
+                                        }
+                                    )
+                                    IconButton(
+                                        onClick = { sliderValue = currentMinutesOfDay },
+                                        modifier = Modifier.size(24.dp).padding(start = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Restore,
+                                            contentDescription = "Reset to current time",
+                                            tint = Color(0xFF6E6EF7),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                // Direct Time Entry Dialog
+                                if (showTimeEntry) {
+                                    val focusRequesterHours = remember { FocusRequester() }
+                                    val focusRequesterMinutes = remember { FocusRequester() }
+
+                                    Dialog(
+                                        onDismissRequest = { showTimeEntry = false },
+                                        properties = DialogProperties(usePlatformDefaultWidth = false)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize().clickable { showTimeEntry = false }.padding(bottom = 260.dp),
+                                            contentAlignment = Alignment.BottomCenter
+                                        ) {
+                                            Card(
+                                                modifier = Modifier.width(180.dp).clickable(enabled = false) { },
+                                                shape = RoundedCornerShape(16.dp),
+                                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
+                                                elevation = CardDefaults.cardElevation(8.dp)
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.padding(16.dp),
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Text("Set Time", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.Center
+                                                    ) {
+                                                        // HOURS
+                                                        OutlinedTextField(
+                                                            value = hourInput,
+                                                            onValueChange = {
+                                                                val digits = it.filter { c -> c.isDigit() }.take(2)
+                                                                hourInput = digits
+                                                                if (digits.length == 2) {
+                                                                    focusRequesterMinutes.requestFocus()
+                                                                }
+                                                            },
+                                                            placeholder = { Text("__", color = Color.Gray) },
+                                                            textStyle = TextStyle(
+                                                                color = Color.White,
+                                                                textAlign = TextAlign.Center,
+                                                                fontSize = 20.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            ),
+                                                            colors = OutlinedTextFieldDefaults.colors(
+                                                                focusedBorderColor = Color(0xFF6E6EF7),
+                                                                unfocusedBorderColor = Color.Gray,
+                                                                cursorColor = Color(0xFF6E6EF7)
+                                                            ),
+                                                            singleLine = true,
+                                                            modifier = Modifier
+                                                                .width(65.dp)
+                                                                .focusRequester(focusRequesterHours),
+                                                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                                            )
+                                                        )
+
+                                                        Text(
+                                                            ":",
+                                                            color = Color.White,
+                                                            fontSize = 20.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 4.dp)
+                                                        )
+
+                                                        // MINUTES
+                                                        OutlinedTextField(
+                                                            value = minuteInput,
+                                                            onValueChange = {
+                                                                val digits = it.filter { c -> c.isDigit() }.take(2)
+                                                                minuteInput = digits
+                                                            },
+                                                            placeholder = { Text("__", color = Color.Gray) },
+                                                            textStyle = TextStyle(
+                                                                color = Color.White,
+                                                                textAlign = TextAlign.Center,
+                                                                fontSize = 20.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            ),
+                                                            colors = OutlinedTextFieldDefaults.colors(
+                                                                focusedBorderColor = Color(0xFF6E6EF7),
+                                                                unfocusedBorderColor = Color.Gray,
+                                                                cursorColor = Color(0xFF6E6EF7)
+                                                            ),
+                                                            singleLine = true,
+                                                            modifier = Modifier
+                                                                .width(65.dp)
+                                                                .focusRequester(focusRequesterMinutes)
+                                                                .onKeyEvent { event ->
+                                                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace && minuteInput.isEmpty()) {
+                                                                        focusRequesterHours.requestFocus()
+                                                                        if (hourInput.isNotEmpty()) {
+                                                                            hourInput = hourInput.dropLast(1)
+                                                                        }
+                                                                        true
+                                                                    } else {
+                                                                        false
+                                                                    }
+                                                                },
+                                                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                                            )
+                                                        )
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                                    Button(
+                                                        onClick = {
+                                                            val h = hourInput.toIntOrNull() ?: 0
+                                                            val m = minuteInput.toIntOrNull() ?: 0
+
+                                                            if (h < 24 && m < 60) {
+                                                                sliderValue = (h * 60 + m).toFloat().coerceIn(0f, currentMinutesOfDay)
+                                                            }
+                                                            showTimeEntry = false
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E6EF7)),
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        shape = RoundedCornerShape(10.dp)
+                                                    ) {
+                                                        Text("Confirm", color = Color.White, fontSize = 16.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right buttons
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TimeAdjustmentButton("+1M") {
+                                sliderValue = (sliderValue + 1).coerceAtMost(currentMinutesOfDay)
+                            }
+                            TimeAdjustmentButton("+1H") {
+                                sliderValue = (sliderValue + 60).coerceAtMost(currentMinutesOfDay)
+                            }
+                        }
                     }
-                    
+
                     Slider(
                         value = sliderValue,
                         onValueChange = { newValue ->
-                            if (newValue <= currentMinutesOfDay) {
-                                sliderValue = newValue
-                            }
+                            sliderValue = newValue.coerceAtMost(currentMinutesOfDay)
                         },
                         valueRange = 0f..1440f,
                         colors = SliderDefaults.colors(
@@ -315,8 +519,17 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                             inactiveTrackColor = Color.White.copy(alpha = 0.2f),
                             activeTickColor = Color.Transparent,
                             inactiveTickColor = Color.Transparent
-                        )
+                        ),
+                        modifier = Modifier.height(32.dp)
                     )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("00:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                        Text("24:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                    }
                 }
             }
 
@@ -337,7 +550,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                     )
                 }
             }
-            
+
             // Calendar Dialog
             if (showCalendar) {
                 Dialog(
@@ -370,22 +583,22 @@ fun CalendarWindow(modifier: Modifier = Modifier, onClose: () -> Unit) {
     val monthName = remember { calendar.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale.getDefault()) }
     val year = remember { calendar.get(Calendar.YEAR) }
     val today = remember { calendar.get(Calendar.DAY_OF_MONTH) }
-    
+
     val daysInMonth = remember { calendar.getActualMaximum(Calendar.DAY_OF_MONTH) }
-    
+
     val firstDayOfWeekOffset = remember {
         val c = calendar.clone() as Calendar
         c.set(Calendar.DAY_OF_MONTH, 1)
         val dayOfWeek = c.get(Calendar.DAY_OF_WEEK)
         if (dayOfWeek == Calendar.SUNDAY) 6 else dayOfWeek - 2
     }
-    
+
     val prevMonthDays = remember {
         val c = calendar.clone() as Calendar
         c.add(Calendar.MONTH, -1)
         c.getActualMaximum(Calendar.DAY_OF_MONTH)
     }
-    
+
     val dates = remember {
         val list = mutableListOf<Pair<Int, Boolean>>()
         for (i in (prevMonthDays - firstDayOfWeekOffset + 1)..prevMonthDays) {
@@ -527,20 +740,37 @@ fun StatisticsWindow(modifier: Modifier = Modifier, onClose: () -> Unit) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                 }
             }
-            
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StatItem(label = "Distance", value = "0,00 km", icon = null)
                 StatItem(label = "Duration", value = "00:00:00", icon = null)
                 StatItem(label = "Calories", value = "0 kcal", icon = null)
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
-            
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StatItem(label = "Steps", value = "0", icon = Icons.AutoMirrored.Filled.DirectionsRun)
                 StatItem(label = "Avg Pace", value = "0.00 km/h", icon = Icons.Default.Timer, iconTint = Color(0xFF007AFF))
                 StatItem(label = "Elevation", value = "0 m", icon = Icons.AutoMirrored.Filled.TrendingUp, iconTint = Color(0xFF81D4FA))
             }
+        }
+    }
+}
+
+@Composable
+fun TimeAdjustmentButton(text: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.padding(horizontal = 2.dp)
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = text, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -592,7 +822,7 @@ fun ActivityTopBar(onMenuClick: () -> Unit, onCalendarClick: () -> Unit) {
         IconButton(onClick = onMenuClick) {
             Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(32.dp))
         }
-        
+
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = null, tint = Color.White)
@@ -601,7 +831,7 @@ fun ActivityTopBar(onMenuClick: () -> Unit, onCalendarClick: () -> Unit) {
             }
             Text(text = currentDate, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
-        
+
         IconButton(onClick = onCalendarClick) {
             Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = "Calendar", tint = Color.White, modifier = Modifier.size(28.dp))
         }
@@ -619,7 +849,7 @@ fun SidebarContent(
             .fillMaxHeight()
             .padding(horizontal = 24.dp)
     ) {
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(48.dp)) // Content moved further down
         Box(modifier = Modifier.height(48.dp), contentAlignment = Alignment.CenterStart) {
             IconButton(
                 onClick = onCloseClick,
@@ -633,7 +863,7 @@ fun SidebarContent(
                 )
             }
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
@@ -658,16 +888,16 @@ fun SidebarContent(
                 modifier = Modifier.size(40.dp).padding(start = 4.dp)
             )
         }
-        
+
         Text(
             text = "Map your moves.\nRemember your moments.",
             color = Color.White.copy(alpha = 0.7f),
             fontSize = 14.sp,
             modifier = Modifier.padding(top = 8.dp)
         )
-        
+
         Spacer(modifier = Modifier.height(48.dp))
-        
+
         val trackingButtonModifier = if (isTracking) {
             Modifier
                 .fillMaxWidth()
@@ -698,15 +928,15 @@ fun SidebarContent(
                 fontWeight = FontWeight.Bold
             )
         }
-        
+
         Spacer(modifier = Modifier.height(48.dp))
-        
+
         SidebarItem("Settings", Icons.Outlined.Settings)
         SidebarItem("Permissions", Icons.Outlined.Security)
         SidebarItem("About", Icons.Outlined.Info)
-        
+
         Spacer(modifier = Modifier.weight(1f))
-        
+
         Row(modifier = Modifier.padding(bottom = 24.dp)) {
             Text(text = "Having issues? ", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
             Text(
