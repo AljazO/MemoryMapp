@@ -21,21 +21,37 @@ class MediaScanner(private val context: Context) {
         val existingIds = dao.getAllMediaIds().toSet()
 
         // 1. Fetch images
-        scanImages(existingIds)
+        val foundImages = scanImages(existingIds)
 
         // 2. Fetch videos
-        scanVideos(existingIds)
+        val foundVideos = scanVideos(existingIds)
+
+        val allFoundIds = foundImages + foundVideos
+
+        // 3. Cleanup: Remove media from DB that no longer exists in MediaStore or was filtered out
+        val idsToRemove = existingIds.filter { !allFoundIds.contains(it) }
+        idsToRemove.forEach { id ->
+            dao.deleteMediaById(id)
+        }
     }
 
-    private suspend fun scanImages(existingIds: Set<String>) {
+    private suspend fun scanImages(existingIds: Set<String>): Set<String> {
+        val foundIds = mutableSetOf<String>()
         val database = AppDatabase.getDatabase(context)
         val dao = database.locationDao()
 
         val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val pathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Images.Media.RELATIVE_PATH
+        } else {
+            MediaStore.Images.Media.DATA
+        }
+
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DATE_TAKEN,
-            MediaStore.Images.Media.DATE_ADDED
+            MediaStore.Images.Media.DATE_ADDED,
+            pathColumn
         )
 
         val cursor = context.contentResolver.query(
@@ -50,10 +66,20 @@ class MediaScanner(private val context: Context) {
             val idColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val dateTakenColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
             val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            val pathColIndex = it.getColumnIndexOrThrow(pathColumn)
 
             while (it.moveToNext()) {
+                // Filter out Screenshots and Downloads
+                val path = it.getString(pathColIndex) ?: ""
+                if (path.contains("Screenshots", ignoreCase = true) ||
+                    path.contains("Download", ignoreCase = true)) {
+                    continue
+                }
+
                 val mediaId = it.getLong(idColumn)
                 val stringId = "img_$mediaId"
+                foundIds.add(stringId)
+
                 if (existingIds.contains(stringId)) continue
 
                 var date = it.getLong(dateTakenColumn)
@@ -115,17 +141,26 @@ class MediaScanner(private val context: Context) {
                 }
             }
         }
+        return foundIds
     }
 
-    private suspend fun scanVideos(existingIds: Set<String>) {
+    private suspend fun scanVideos(existingIds: Set<String>): Set<String> {
+        val foundIds = mutableSetOf<String>()
         val database = AppDatabase.getDatabase(context)
         val dao = database.locationDao()
 
         val uri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        val pathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Video.Media.RELATIVE_PATH
+        } else {
+            MediaStore.Video.Media.DATA
+        }
+
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DATE_TAKEN,
-            MediaStore.Video.Media.DATE_ADDED
+            MediaStore.Video.Media.DATE_ADDED,
+            pathColumn
         )
 
         val cursor = context.contentResolver.query(
@@ -140,10 +175,20 @@ class MediaScanner(private val context: Context) {
             val idColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
             val dateTakenColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_TAKEN)
             val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+            val pathColIndex = it.getColumnIndexOrThrow(pathColumn)
 
             while (it.moveToNext()) {
+                // Filter out Screenshots and Downloads
+                val path = it.getString(pathColIndex) ?: ""
+                if (path.contains("Screenshots", ignoreCase = true) ||
+                    path.contains("Download", ignoreCase = true)) {
+                    continue
+                }
+
                 val mediaId = it.getLong(idColumn)
                 val stringId = "vid_$mediaId"
+                foundIds.add(stringId)
+
                 if (existingIds.contains(stringId)) continue
 
                 var date = it.getLong(dateTakenColumn)
@@ -198,6 +243,7 @@ class MediaScanner(private val context: Context) {
                 }
             }
         }
+        return foundIds
     }
 
     private fun parseLocation(location: String): Pair<Double, Double>? {

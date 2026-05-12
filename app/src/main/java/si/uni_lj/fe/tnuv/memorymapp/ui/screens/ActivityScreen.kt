@@ -124,26 +124,63 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         )
     }
 
-    val mediaPermissionLauncher = rememberLauncherForActivityResult(
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val combinedPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        hasMediaPermission = permissions.values.all { it }
+        val mediaGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.READ_MEDIA_IMAGES] == true &&
+            permissions[Manifest.permission.READ_MEDIA_VIDEO] == true
+        } else {
+            permissions[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+        
+        val locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        
+        hasMediaPermission = mediaGranted
+        hasLocationPermission = locationGranted
+    }
+
+    LaunchedEffect(Unit) {
+        val perms = mutableListOf<String>()
+        
+        // Media permissions
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED)
+                perms.add(Manifest.permission.READ_MEDIA_IMAGES)
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED)
+                perms.add(Manifest.permission.READ_MEDIA_VIDEO)
+        } else {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+                perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) != PackageManager.PERMISSION_GRANTED)
+                perms.add(Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+
+        // Location permissions
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            perms.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+
+        if (perms.isNotEmpty()) {
+            combinedPermissionLauncher.launch(perms.toTypedArray())
+        }
     }
 
     LaunchedEffect(hasMediaPermission) {
-        if (!hasMediaPermission) {
-            val perms = mutableListOf<String>()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                perms.add(Manifest.permission.READ_MEDIA_IMAGES)
-                perms.add(Manifest.permission.READ_MEDIA_VIDEO)
-            } else {
-                perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                perms.add(Manifest.permission.ACCESS_MEDIA_LOCATION)
-            }
-            mediaPermissionLauncher.launch(perms.toTypedArray())
-        } else {
+        if (hasMediaPermission) {
             mediaScanner.scanGallery()
         }
     }
@@ -252,22 +289,6 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         }
     }
 
-    var hasLocationPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-    }
-
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
     // Initial center on current location and auto-start tracking
@@ -287,8 +308,18 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                 }
             }
         } else if (!hasLocationPermission) {
-            permissionLauncher.launch(
+            combinedPermissionLauncher.launch(
                 arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
+
+    // Auto-follow history indicator when sliding to the past
+    LaunchedEffect(historyIndicatorPosition, isLiveTime, isUserInteracting) {
+        if (!isLiveTime && historyIndicatorPosition != null && !isUserInteracting) {
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLng(historyIndicatorPosition),
+                400
             )
         }
     }
@@ -333,7 +364,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
             Card(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 8.dp),
                 shape = RoundedCornerShape(32.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.LightGray)
             ) {
@@ -377,12 +408,14 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
 
                         // History Indicator
                         if (historyIndicatorPosition != null && !isLiveTime) {
-                            Circle(
-                                center = historyIndicatorPosition,
-                                radius = 15.0,
-                                fillColor = Color(0xFF4A90E2),
-                                strokeColor = Color.White,
-                                strokeWidth = 2f
+                            val historyIcon = remember {
+                                BitmapDescriptorFactory.fromBitmap(createHistoryDotBitmap(context))
+                            }
+                            Marker(
+                                state = rememberMarkerState(position = historyIndicatorPosition),
+                                icon = historyIcon,
+                                anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
+                                flat = true
                             )
                         }
 
@@ -825,7 +858,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
 @Composable
 fun CalendarWindow(modifier: Modifier = Modifier, onClose: () -> Unit) {
     val calendar = remember { Calendar.getInstance() }
-    val monthName = remember { calendar.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale.getDefault()) }
+    val monthName = remember { calendar.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale.ENGLISH) }
     val year = remember { calendar.get(Calendar.YEAR) }
     val today = remember { calendar.get(Calendar.DAY_OF_MONTH) }
 
@@ -1060,7 +1093,11 @@ fun ActivityTopBar(
     onNextDay: () -> Unit
 ) {
     val dateString = remember(selectedDate) {
-        SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(selectedDate.time)
+        SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).format(selectedDate.time)
+    }
+
+    val dayOfWeek = remember(selectedDate) {
+        SimpleDateFormat("EEEE", Locale.ENGLISH).format(selectedDate.time)
     }
 
     val isToday = remember(selectedDate) {
@@ -1094,7 +1131,7 @@ fun ActivityTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 0.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1103,7 +1140,10 @@ fun ActivityTopBar(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.height(32.dp) // Explicitly limit height of the < Today > row
+            ) {
                 IconButton(onClick = onPrevDay) {
                     Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = "Previous Day", tint = Color.White)
                 }
@@ -1125,7 +1165,18 @@ fun ActivityTopBar(
                     )
                 }
             }
-            Text(text = dateString, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text(
+                text = dateString,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier.offset(y = (-4).dp) // Pull up closer to the row above
+            )
+            Text(
+                text = dayOfWeek,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier.offset(y = (-8).dp) // Pull up even closer
+            )
         }
 
         IconButton(onClick = onCalendarClick) {
@@ -1289,6 +1340,27 @@ private fun createMediaBitmap(context: Context, isVideo: Boolean): Bitmap {
         it.setTint(android.graphics.Color.WHITE)
         it.draw(canvas)
     }
+
+    return bitmap
+}
+
+private fun createHistoryDotBitmap(context: Context): Bitmap {
+    val density = context.resources.displayMetrics.density
+    val size = (16 * density).toInt() // ~16dp fixed screen size
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val center = size / 2f
+
+    // White circle border
+    val paint = android.graphics.Paint().apply {
+        color = android.graphics.Color.WHITE
+        isAntiAlias = true
+    }
+    canvas.drawCircle(center, center, size / 2.1f, paint)
+
+    // Blue circle center
+    paint.color = android.graphics.Color.parseColor("#4A90E2")
+    canvas.drawCircle(center, center, size / 2.8f, paint)
 
     return bitmap
 }
