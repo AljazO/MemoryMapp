@@ -56,57 +56,109 @@ import androidx.compose.ui.input.key.*
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 import androidx.compose.ui.platform.LocalLocale
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
+fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTracking: (Boolean) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Date state
+    var selectedDate by remember { mutableStateOf(Calendar.getInstance()) }
+    val isToday = remember(selectedDate) {
+        val today = Calendar.getInstance()
+        selectedDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                selectedDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+    }
 
     // Database and DAO
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
 
-    // Path points from database
-    val calendarToday = Calendar.getInstance()
-    calendarToday.set(Calendar.HOUR_OF_DAY, 0)
-    calendarToday.set(Calendar.MINUTE, 0)
-    calendarToday.set(Calendar.SECOND, 0)
-    calendarToday.set(Calendar.MILLISECOND, 0)
-    val startOfDay = calendarToday.timeInMillis
+    // Path points from database for selected date
+    val startOfDay = remember(selectedDate) {
+        val cal = selectedDate.clone() as Calendar
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
 
-    val allTodayPoints by locationDao.getPointsInRange(startOfDay, startOfDay + 86400000)
+    val allPointsForDay by locationDao.getPointsInRange(startOfDay, startOfDay + 86400000)
         .collectAsState(initial = emptyList())
 
     // Slider state
     val calendarNow = Calendar.getInstance()
-    val initialMinutes = (calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()
-    var currentMinutesOfDay by remember { mutableFloatStateOf(initialMinutes) }
+    val initialMinutes = if (isToday) {
+        (calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()
+    } else {
+        1440f // End of day for past days
+    }
+    
+    var currentMinutesOfToday by remember { mutableFloatStateOf((calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()) }
     var sliderValue by remember { mutableFloatStateOf(initialMinutes) }
 
-    // Filter points based on slider
-    val pastPathPoints = remember(allTodayPoints, sliderValue) {
-        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
-        allTodayPoints.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+    // Reset slider when date changes
+    LaunchedEffect(selectedDate) {
+        if (isToday) {
+            sliderValue = currentMinutesOfToday
+        } else {
+            sliderValue = 1440f
+        }
     }
 
-    val futurePathPoints = remember(allTodayPoints, sliderValue) {
+    // Filter points based on slider
+    val pastPathPoints = remember(allPointsForDay, sliderValue) {
         val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
-        allTodayPoints.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+        allPointsForDay.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+    }
+
+    val futurePathPoints = remember(allPointsForDay, sliderValue) {
+        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
+        allPointsForDay.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
     }
 
     val historyIndicatorPosition = remember(pastPathPoints) {
         pastPathPoints.lastOrNull()
     }
 
-    val isLiveTime = remember(sliderValue, currentMinutesOfDay) {
-        Math.abs(sliderValue - currentMinutesOfDay) < 1.0f
+    val isLiveTime = remember(sliderValue, currentMinutesOfToday, isToday) {
+        isToday && Math.abs(sliderValue - currentMinutesOfToday) < 1.0f
+    }
+
+    // Auto-advance slider if at live time
+    LaunchedEffect(currentMinutesOfToday) {
+        if (isLiveTime) {
+            sliderValue = currentMinutesOfToday
+        }
+    }
+
+    // Handle resume: Refresh time and jump to live if tracking
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val c = Calendar.getInstance()
+                currentMinutesOfToday = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)).toFloat()
+                if (isTracking && isToday) {
+                    sliderValue = currentMinutesOfToday
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(Unit) {
         while(true) {
             val c = Calendar.getInstance()
-            currentMinutesOfDay = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)).toFloat()
+            currentMinutesOfToday = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)).toFloat()
             kotlinx.coroutines.delay(60000)
         }
     }
@@ -148,9 +200,13 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // Initial center on current location
+    // Initial center on current location and auto-start tracking
     LaunchedEffect(hasLocationPermission) {
         if (hasLocationPermission && !hasCentredOnce) {
+            // Auto-start tracking if not already tracking
+            if (!isTracking) {
+                onToggleTracking(true)
+            }
             fusedLocationClient.lastLocation.addOnSuccessListener { location ->
                 location?.let {
                     val startLatLng = LatLng(it.latitude, it.longitude)
@@ -168,9 +224,9 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
     }
 
     // Auto-follow current location if tracking and not interacting
-    LaunchedEffect(allTodayPoints, isUserInteracting, isTracking) {
-        if (isTracking && !isUserInteracting && allTodayPoints.isNotEmpty()) {
-            val lastPoint = allTodayPoints.last()
+    LaunchedEffect(allPointsForDay, isUserInteracting, isTracking, isToday) {
+        if (isTracking && isToday && !isUserInteracting && allPointsForDay.isNotEmpty()) {
+            val lastPoint = allPointsForDay.last()
             val lastLatLng = LatLng(lastPoint.latitude, lastPoint.longitude)
             cameraPositionState.animate(CameraUpdateFactory.newLatLng(lastLatLng))
         }
@@ -179,8 +235,21 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
     Scaffold(
         topBar = {
             ActivityTopBar(
+                selectedDate = selectedDate,
                 onMenuClick = onMenuClick,
-                onCalendarClick = { showCalendar = true }
+                onCalendarClick = { showCalendar = true },
+                onPrevDay = {
+                    val newCal = selectedDate.clone() as Calendar
+                    newCal.add(Calendar.DAY_OF_YEAR, -1)
+                    selectedDate = newCal
+                },
+                onNextDay = {
+                    if (!isToday) {
+                        val newCal = selectedDate.clone() as Calendar
+                        newCal.add(Calendar.DAY_OF_YEAR, 1)
+                        selectedDate = newCal
+                    }
+                }
             )
         },
         containerColor = DarkBg
@@ -348,16 +417,18 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                                             showTimeEntry = true
                                         }
                                     )
-                                    IconButton(
-                                        onClick = { sliderValue = currentMinutesOfDay },
-                                        modifier = Modifier.size(24.dp).padding(start = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Restore,
-                                            contentDescription = "Reset to current time",
-                                            tint = Color(0xFF6E6EF7),
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                    if (isToday) {
+                                        IconButton(
+                                            onClick = { sliderValue = currentMinutesOfToday },
+                                            modifier = Modifier.size(24.dp).padding(start = 4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Restore,
+                                                contentDescription = "Reset to current time",
+                                                tint = Color(0xFF6E6EF7),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
 
@@ -478,7 +549,12 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                                                             val m = minuteInput.toIntOrNull() ?: 0
 
                                                             if (h < 24 && m < 60) {
-                                                                sliderValue = (h * 60 + m).toFloat().coerceIn(0f, currentMinutesOfDay)
+                                                                val requestedMinutes = (h * 60 + m).toFloat()
+                                                                sliderValue = if (isToday) {
+                                                                    requestedMinutes.coerceIn(0f, currentMinutesOfToday)
+                                                                } else {
+                                                                    requestedMinutes.coerceIn(0f, 1440f)
+                                                                }
                                                             }
                                                             showTimeEntry = false
                                                         },
@@ -499,10 +575,12 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                         // Right buttons
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TimeAdjustmentButton("+1M") {
-                                sliderValue = (sliderValue + 1).coerceAtMost(currentMinutesOfDay)
+                                val max = if (isToday) currentMinutesOfToday else 1440f
+                                sliderValue = (sliderValue + 1).coerceAtMost(max)
                             }
                             TimeAdjustmentButton("+1H") {
-                                sliderValue = (sliderValue + 60).coerceAtMost(currentMinutesOfDay)
+                                val max = if (isToday) currentMinutesOfToday else 1440f
+                                sliderValue = (sliderValue + 60).coerceAtMost(max)
                             }
                         }
                     }
@@ -510,7 +588,8 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean) {
                     Slider(
                         value = sliderValue,
                         onValueChange = { newValue ->
-                            sliderValue = newValue.coerceAtMost(currentMinutesOfDay)
+                            val max = if (isToday) currentMinutesOfToday else 1440f
+                            sliderValue = newValue.coerceAtMost(max)
                         },
                         valueRange = 0f..1440f,
                         colors = SliderDefaults.colors(
@@ -807,9 +886,44 @@ fun ZoomButton(icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-fun ActivityTopBar(onMenuClick: () -> Unit, onCalendarClick: () -> Unit) {
-    val currentDate = remember {
-        SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(Date())
+fun ActivityTopBar(
+    selectedDate: Calendar,
+    onMenuClick: () -> Unit,
+    onCalendarClick: () -> Unit,
+    onPrevDay: () -> Unit,
+    onNextDay: () -> Unit
+) {
+    val dateString = remember(selectedDate) {
+        SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(selectedDate.time)
+    }
+
+    val isToday = remember(selectedDate) {
+        val today = Calendar.getInstance()
+        selectedDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                selectedDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+    }
+
+    val relativeDay = remember(selectedDate) {
+        val today = Calendar.getInstance()
+        today.set(Calendar.HOUR_OF_DAY, 0)
+        today.set(Calendar.MINUTE, 0)
+        today.set(Calendar.SECOND, 0)
+        today.set(Calendar.MILLISECOND, 0)
+
+        val target = selectedDate.clone() as Calendar
+        target.set(Calendar.HOUR_OF_DAY, 0)
+        target.set(Calendar.MINUTE, 0)
+        target.set(Calendar.SECOND, 0)
+        target.set(Calendar.MILLISECOND, 0)
+
+        val diffMillis = today.timeInMillis - target.timeInMillis
+        val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()
+
+        when (diffDays) {
+            0 -> "Today"
+            1 -> "Yesterday"
+            else -> "$diffDays days ago"
+        }
     }
 
     Row(
@@ -825,11 +939,28 @@ fun ActivityTopBar(onMenuClick: () -> Unit, onCalendarClick: () -> Unit) {
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = null, tint = Color.White)
-                Text(text = "Today", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
-                Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = Color.White)
+                IconButton(onClick = onPrevDay) {
+                    Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = "Previous Day", tint = Color.White)
+                }
+                Text(
+                    text = relativeDay,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                IconButton(
+                    onClick = onNextDay,
+                    enabled = !isToday
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Next Day",
+                        tint = if (isToday) Color.White.copy(alpha = 0.3f) else Color.White
+                    )
+                }
             }
-            Text(text = currentDate, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text(text = dateString, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
 
         IconButton(onClick = onCalendarClick) {

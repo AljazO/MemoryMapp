@@ -58,7 +58,7 @@ fun MemoryMappApp() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     
-    var isTracking by remember { mutableStateOf(false) } // Default to false, let service handle it
+    var isTracking by remember { mutableStateOf(LocationService.isRunning) }
 
     // Handle Notification Permission for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -170,7 +170,8 @@ fun MemoryMappApp() {
                 composable("activity") {
                     ActivityScreen(
                         onMenuClick = { scope.launch { drawerState.open() } },
-                        isTracking = isTracking
+                        isTracking = isTracking,
+                        onToggleTracking = { isTracking = it }
                     )
                 }
                 composable("memories") {
