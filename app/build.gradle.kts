@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.google.maps.compose)
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
+    implementation(libs.androidx.exifinterface)
     
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.6.0")

@@ -7,6 +7,7 @@ import android.app.Service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
@@ -42,8 +43,8 @@ class LocationService : Service() {
     }
 
     private fun isValidLocation(location: Location): Boolean {
-        // 1. Accuracy check: ignore points with low accuracy
-        if (location.accuracy > 35) return false
+        // 1. Accuracy check: ignore points with low accuracy (relaxed slightly)
+        if (location.accuracy > 50) return false
 
         // 2. Minimum distance check to avoid jitter when stationary
         lastSavedLocation?.let { last ->
@@ -93,7 +94,11 @@ class LocationService : Service() {
             .setOngoing(true)
             .build()
         
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000)
             .setMinUpdateIntervalMillis(5000)

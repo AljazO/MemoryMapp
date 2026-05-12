@@ -2,7 +2,6 @@ package si.uni_lj.fe.tnuv.memorymapp.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -58,7 +57,6 @@ import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
 import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
-import androidx.compose.ui.platform.LocalLocale
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -117,6 +115,9 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                 ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
             } else {
                 ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
             }
@@ -131,16 +132,17 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
 
     LaunchedEffect(hasMediaPermission) {
         if (!hasMediaPermission) {
-            val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                arrayOf(
-                    Manifest.permission.READ_MEDIA_IMAGES,
-                    Manifest.permission.READ_MEDIA_VIDEO,
-                    Manifest.permission.ACCESS_MEDIA_LOCATION
-                )
+            val perms = mutableListOf<String>()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.READ_MEDIA_IMAGES)
+                perms.add(Manifest.permission.READ_MEDIA_VIDEO)
             } else {
-                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
-            mediaPermissionLauncher.launch(perms)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                perms.add(Manifest.permission.ACCESS_MEDIA_LOCATION)
+            }
+            mediaPermissionLauncher.launch(perms.toTypedArray())
         } else {
             mediaScanner.scanGallery()
         }
@@ -172,6 +174,11 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         allPointsForDay.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
     }
 
+    val filteredMediaPoints = remember(mediaPointsForDay, sliderValue) {
+        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
+        mediaPointsForDay.filter { it.timestamp <= maxTimestamp }
+    }
+
     val futurePathPoints = remember(allPointsForDay, sliderValue) {
         val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
         allPointsForDay.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
@@ -182,7 +189,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
     }
 
     val isLiveTime = remember(sliderValue, currentMinutesOfToday, isToday) {
-        isToday && Math.abs(sliderValue - currentMinutesOfToday) < 1.0f
+        isToday && kotlin.math.abs(sliderValue - currentMinutesOfToday) < 1.0f
     }
 
     // Auto-advance slider if at live time
@@ -192,7 +199,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         }
     }
 
-    // Handle resume: Refresh time and jump to live if tracking
+    // Handle resume: Refresh time, jump to live if tracking, and scan media
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -200,6 +207,13 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                 currentMinutesOfToday = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)).toFloat()
                 if (isTracking && isToday) {
                     sliderValue = currentMinutesOfToday
+                }
+                
+                // Scan media on resume to pick up new photos
+                if (hasMediaPermission) {
+                    scope.launch {
+                        mediaScanner.scanGallery()
+                    }
                 }
             }
         }
@@ -340,7 +354,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                             }
                             true
                         },
-                        uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true),
+                        uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false),
                         properties = MapProperties(isMyLocationEnabled = hasLocationPermission)
                     ) {
                         // Future/Ghost Path (Lighter)
@@ -373,27 +387,51 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                         }
 
                         // Media Pins
-                        mediaPointsForDay.forEach { media ->
-                            Marker(
-                                state = rememberMarkerState(position = LatLng(media.latitude, media.longitude)),
-                                icon = BitmapDescriptorFactory.fromBitmap(
-                                    createMediaBitmap(context, media.type == MediaType.VIDEO)
-                                ),
-                                onClick = {
-                                    selectedMediaPoint = media
-                                    true
+                        filteredMediaPoints.forEach { media ->
+                            key(media.id) {
+                                val markerIcon = remember(media.type) {
+                                    BitmapDescriptorFactory.fromBitmap(createMediaBitmap(context, media.type == MediaType.VIDEO))
                                 }
-                            )
+                                Marker(
+                                    state = rememberMarkerState(position = LatLng(media.latitude, media.longitude)),
+                                    icon = markerIcon,
+                                    onClick = {
+                                        selectedMediaPoint = media
+                                        true
+                                    }
+                                )
+                            }
                         }
                     }
 
-                    // Custom Zoom Controls
+                    // Custom Zoom and Recenter Controls
                     Column(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(end = 12.dp, top = 60.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Recenter Button
+                        ZoomButton(
+                            icon = if (!isUserInteracting && isTracking && isToday) Icons.Default.MyLocation else Icons.Default.LocationSearching,
+                            iconTint = if (!isUserInteracting && isTracking && isToday) Color(0xFF6E6EF7) else Color.Black
+                        ) {
+                            isUserInteracting = false
+                            scope.launch {
+                                fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                                    location?.let {
+                                        scope.launch {
+                                            cameraPositionState.animate(
+                                                CameraUpdateFactory.newLatLngZoom(
+                                                    LatLng(it.latitude, it.longitude),
+                                                    15f
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         ZoomButton(icon = Icons.Default.Add) {
                             scope.launch {
                                 cameraPositionState.animate(CameraUpdateFactory.zoomIn())
@@ -439,23 +477,23 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                 }
             }
 
-            // Time slider bar (Restored Card with background, slimmed down)
+            // Time slider bar
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 70.dp)
+                    .padding(horizontal = 16.dp, vertical = 60.dp)
                     .fillMaxWidth()
-                    .height(106.dp), // Slimmed to fit 00:00 and 24:00 better
+                    .height(106.dp),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f))
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize().offset(y = (-8).dp).padding(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
                     val hours = (sliderValue / 60).toInt()
                     val minutes = (sliderValue % 60).toInt()
-                    val timeString = String.format(LocalLocale.current.platformLocale, "%02d:%02d", hours, minutes)
+                    val timeString = "%02d:%02d".format(hours, minutes)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -537,12 +575,17 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                                                             value = hourInput,
                                                             onValueChange = {
                                                                 val digits = it.filter { c -> c.isDigit() }.take(2)
-                                                                hourInput = digits
+                                                                val value = digits.toIntOrNull()
+
+                                                                if (value == null || value <= 23) {
+                                                                    hourInput = digits
+                                                                }
+
                                                                 if (digits.length == 2) {
                                                                     focusRequesterMinutes.requestFocus()
                                                                 }
                                                             },
-                                                            placeholder = { Text("__", color = Color.Gray) },
+                                                            placeholder = { Text("_ _", color = Color.Gray) },
                                                             textStyle = TextStyle(
                                                                 color = Color.White,
                                                                 textAlign = TextAlign.Center,
@@ -576,9 +619,13 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                                                             value = minuteInput,
                                                             onValueChange = {
                                                                 val digits = it.filter { c -> c.isDigit() }.take(2)
-                                                                minuteInput = digits
+                                                                val value = digits.toIntOrNull()
+
+                                                                if (value == null || value <= 59) {
+                                                                    minuteInput = digits
+                                                                }
                                                             },
-                                                            placeholder = { Text("__", color = Color.Gray) },
+                                                            placeholder = { Text("_ _", color = Color.Gray) },
                                                             textStyle = TextStyle(
                                                                 color = Color.White,
                                                                 textAlign = TextAlign.Center,
@@ -989,7 +1036,7 @@ fun StatItem(label: String, value: String, icon: ImageVector?, iconTint: Color =
 }
 
 @Composable
-fun ZoomButton(icon: ImageVector, onClick: () -> Unit) {
+fun ZoomButton(icon: ImageVector, iconTint: Color = Color.Black, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .size(36.dp)
@@ -999,7 +1046,7 @@ fun ZoomButton(icon: ImageVector, onClick: () -> Unit) {
         tonalElevation = 2.dp
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(imageVector = icon, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+            Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -1036,9 +1083,8 @@ fun ActivityTopBar(
         target.set(Calendar.MILLISECOND, 0)
 
         val diffMillis = today.timeInMillis - target.timeInMillis
-        val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()
 
-        when (diffDays) {
+        when (val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()) {
             0 -> "Today"
             1 -> "Yesterday"
             else -> "$diffDays days ago"

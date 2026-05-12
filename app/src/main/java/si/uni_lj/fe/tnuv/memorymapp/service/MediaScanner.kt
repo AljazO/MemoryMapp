@@ -2,7 +2,7 @@ package si.uni_lj.fe.tnuv.memorymapp.service
 
 import android.content.ContentUris
 import android.content.Context
-import android.media.ExifInterface
+import androidx.exifinterface.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -16,21 +16,26 @@ import kotlinx.coroutines.withContext
 class MediaScanner(private val context: Context) {
 
     suspend fun scanGallery() = withContext(Dispatchers.IO) {
+        val database = AppDatabase.getDatabase(context)
+        val dao = database.locationDao()
+        val existingIds = dao.getAllMediaIds().toSet()
+
         // 1. Fetch images
-        scanImages()
+        scanImages(existingIds)
 
         // 2. Fetch videos
-        scanVideos()
+        scanVideos(existingIds)
     }
 
-    private suspend fun scanImages() {
+    private suspend fun scanImages(existingIds: Set<String>) {
         val database = AppDatabase.getDatabase(context)
         val dao = database.locationDao()
 
         val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATE_TAKEN
+            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.DATE_ADDED
         )
 
         val cursor = context.contentResolver.query(
@@ -43,36 +48,67 @@ class MediaScanner(private val context: Context) {
 
         cursor?.use {
             val idColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val dateColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val dateTakenColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 
             while (it.moveToNext()) {
-                val id = it.getLong(idColumn)
-                val date = it.getLong(dateColumn)
-                val contentUri = ContentUris.withAppendedId(uri, id)
+                val mediaId = it.getLong(idColumn)
+                val stringId = "img_$mediaId"
+                if (existingIds.contains(stringId)) continue
+
+                var date = it.getLong(dateTakenColumn)
+                if (date == 0L) {
+                    date = it.getLong(dateAddedColumn) * 1000 // DATE_ADDED is in seconds
+                }
+
+                val contentUri = ContentUris.withAppendedId(uri, mediaId)
 
                 // For Android 10+, we need setRequireOriginal to get location from EXIF
                 val photoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    MediaStore.setRequireOriginal(contentUri)
+                    try {
+                        MediaStore.setRequireOriginal(contentUri)
+                    } catch (e: SecurityException) {
+                        contentUri
+                    }
                 } else {
                     contentUri
                 }
 
                 try {
+                    var lat: Double? = null
+                    var lon: Double? = null
+
                     context.contentResolver.openInputStream(photoUri)?.use { stream ->
                         val exif = ExifInterface(stream)
-                        val latLong = FloatArray(2)
-                        if (exif.getLatLong(latLong)) {
-                            dao.insertMedia(
-                                MediaPoint(
-                                    id = id,
-                                    uri = contentUri.toString(),
-                                    latitude = latLong[0].toDouble(),
-                                    longitude = latLong[1].toDouble(),
-                                    timestamp = date,
-                                    type = MediaType.IMAGE
-                                )
-                            )
+                        val latLong = exif.latLong
+                        if (latLong != null) {
+                            lat = latLong[0]
+                            lon = latLong[1]
                         }
+                    }
+
+                    // Fallback to app location if EXIF is missing
+                    if (lat == null || lon == null) {
+                        val range = 300000L // 5 minutes
+                        val closest = dao.getPointsInRangeSync(date - range, date + range)
+                            .minByOrNull { Math.abs(it.timestamp - date) }
+                        if (closest != null) {
+                            lat = closest.latitude
+                            lon = closest.longitude
+                        }
+                    }
+
+                    if (lat != null && lon != null) {
+                        dao.insertMedia(
+                            MediaPoint(
+                                id = stringId,
+                                uri = contentUri.toString(),
+                                latitude = lat!!,
+                                longitude = lon!!,
+                                timestamp = date,
+                                type = MediaType.IMAGE
+                            )
+                        )
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -81,14 +117,15 @@ class MediaScanner(private val context: Context) {
         }
     }
 
-    private suspend fun scanVideos() {
+    private suspend fun scanVideos(existingIds: Set<String>) {
         val database = AppDatabase.getDatabase(context)
         val dao = database.locationDao()
 
         val uri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DATE_TAKEN
+            MediaStore.Video.Media.DATE_TAKEN,
+            MediaStore.Video.Media.DATE_ADDED
         )
 
         val cursor = context.contentResolver.query(
@@ -101,31 +138,58 @@ class MediaScanner(private val context: Context) {
 
         cursor?.use {
             val idColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-            val dateColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_TAKEN)
+            val dateTakenColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_TAKEN)
+            val dateAddedColumn = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
 
             while (it.moveToNext()) {
-                val id = it.getLong(idColumn)
-                val date = it.getLong(dateColumn)
-                val contentUri = ContentUris.withAppendedId(uri, id)
+                val mediaId = it.getLong(idColumn)
+                val stringId = "vid_$mediaId"
+                if (existingIds.contains(stringId)) continue
+
+                var date = it.getLong(dateTakenColumn)
+                if (date == 0L) {
+                    date = it.getLong(dateAddedColumn) * 1000
+                }
+
+                val contentUri = ContentUris.withAppendedId(uri, mediaId)
 
                 val retriever = MediaMetadataRetriever()
                 try {
                     retriever.setDataSource(context, contentUri)
                     val location = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
+                    
+                    var lat: Double? = null
+                    var lon: Double? = null
+
                     if (location != null) {
-                        // Location format: "+46.0569+014.5058/"
-                        parseLocation(location)?.let { (lat, lon) ->
-                            dao.insertMedia(
-                                MediaPoint(
-                                    id = id,
-                                    uri = contentUri.toString(),
-                                    latitude = lat,
-                                    longitude = lon,
-                                    timestamp = date,
-                                    type = MediaType.VIDEO
-                                )
-                            )
+                        parseLocation(location)?.let { (l1, l2) ->
+                            lat = l1
+                            lon = l2
                         }
+                    }
+
+                    // Fallback to app location
+                    if (lat == null || lon == null) {
+                        val range = 300000L // 5 minutes
+                        val closest = dao.getPointsInRangeSync(date - range, date + range)
+                            .minByOrNull { Math.abs(it.timestamp - date) }
+                        if (closest != null) {
+                            lat = closest.latitude
+                            lon = closest.longitude
+                        }
+                    }
+
+                    if (lat != null && lon != null) {
+                        dao.insertMedia(
+                            MediaPoint(
+                                id = stringId,
+                                uri = contentUri.toString(),
+                                latitude = lat!!,
+                                longitude = lon!!,
+                                timestamp = date,
+                                type = MediaType.VIDEO
+                            )
+                        )
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()

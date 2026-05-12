@@ -9,7 +9,7 @@ enum class MediaType {
 
 @Entity(tableName = "media_points")
 data class MediaPoint(
-    @PrimaryKey val id: Long, // Use the MediaStore ID as primary key
+    @PrimaryKey val id: String, // Changed to String to avoid collisions
     val uri: String,
     val latitude: Double,
     val longitude: Double,
