@@ -1,7 +1,6 @@
 package si.uni_lj.fe.tnuv.memorymapp.ui.screens
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -53,12 +52,26 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.*
+import android.os.Build
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
+import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
+import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
+import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
 import androidx.compose.ui.platform.LocalLocale
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.Marker
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.core.content.res.ResourcesCompat
+import androidx.compose.foundation.Image
+import coil.compose.rememberAsyncImagePainter
+import android.net.Uri
+import android.content.Context
+import androidx.compose.ui.graphics.asImageBitmap
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +104,47 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
 
     val allPointsForDay by locationDao.getPointsInRange(startOfDay, startOfDay + 86400000)
         .collectAsState(initial = emptyList())
+
+    val mediaPointsForDay by locationDao.getMediaInRange(startOfDay, startOfDay + 86400000)
+        .collectAsState(initial = emptyList())
+
+    // Media Scanning logic
+    val mediaScanner = remember { MediaScanner(context) }
+    
+    var hasMediaPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+            } else {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            }
+        )
+    }
+
+    val mediaPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasMediaPermission = permissions.values.all { it }
+    }
+
+    LaunchedEffect(hasMediaPermission) {
+        if (!hasMediaPermission) {
+            val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                arrayOf(
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.ACCESS_MEDIA_LOCATION
+                )
+            } else {
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+            mediaPermissionLauncher.launch(perms)
+        } else {
+            mediaScanner.scanGallery()
+        }
+    }
 
     // Slider state
     val calendarNow = Calendar.getInstance()
@@ -166,6 +220,8 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
     var showCalendar by remember { mutableStateOf(false) }
     var showStatistics by remember { mutableStateOf(false) }
     var showTimeEntry by remember { mutableStateOf(false) }
+    var selectedMediaPoint by remember { mutableStateOf<MediaPoint?>(null) }
+    
     var hourInput by remember { mutableStateOf("") }
     var minuteInput by remember { mutableStateOf("") }
 
@@ -313,6 +369,20 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                                 fillColor = Color(0xFF4A90E2),
                                 strokeColor = Color.White,
                                 strokeWidth = 2f
+                            )
+                        }
+
+                        // Media Pins
+                        mediaPointsForDay.forEach { media ->
+                            Marker(
+                                state = rememberMarkerState(position = LatLng(media.latitude, media.longitude)),
+                                icon = BitmapDescriptorFactory.fromBitmap(
+                                    createMediaBitmap(context, media.type == MediaType.VIDEO)
+                                ),
+                                onClick = {
+                                    selectedMediaPoint = media
+                                    true
+                                }
                             )
                         }
                     }
@@ -558,11 +628,19 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                                                             }
                                                             showTimeEntry = false
                                                         },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E6EF7)),
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        shape = RoundedCornerShape(10.dp)
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        contentPadding = PaddingValues(0.dp)
                                                     ) {
-                                                        Text("Confirm", color = Color.White, fontSize = 16.sp)
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxSize()
+                                                                .background(Brush.horizontalGradient(listOf(GradientStart, GradientEnd))),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text("Confirm", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                                        }
                                                     }
                                                 }
                                             }
@@ -608,6 +686,47 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                     ) {
                         Text("00:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                         Text("24:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Media Preview Popup
+            if (selectedMediaPoint != null) {
+                Dialog(
+                    onDismissRequest = { selectedMediaPoint = null },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.8f))
+                            .clickable { selectedMediaPoint = null },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .padding(24.dp)
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .clickable(enabled = false) { },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.Black)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(selectedMediaPoint!!.uri),
+                                    contentDescription = "Media Preview",
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                
+                                IconButton(
+                                    onClick = { selectedMediaPoint = null },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1098,4 +1217,32 @@ fun SidebarItem(text: String, icon: ImageVector) {
             fontWeight = FontWeight.Medium
         )
     }
+}
+
+private fun createMediaBitmap(context: Context, isVideo: Boolean): Bitmap {
+    val size = 100
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    // White circle border
+    val paint = android.graphics.Paint().apply {
+        color = android.graphics.Color.WHITE
+        isAntiAlias = true
+    }
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+
+    // Black circle center
+    paint.color = android.graphics.Color.BLACK
+    canvas.drawCircle(size / 2f, size / 2f, size / 2.3f, paint)
+
+    // Icon
+    val iconRes = if (isVideo) android.R.drawable.presence_video_online else android.R.drawable.ic_menu_camera
+    val drawable = ResourcesCompat.getDrawable(context.resources, iconRes, null)
+    drawable?.let {
+        it.setBounds(size / 4, size / 4, (size * 3) / 4, (size * 3) / 4)
+        it.setTint(android.graphics.Color.WHITE)
+        it.draw(canvas)
+    }
+
+    return bitmap
 }

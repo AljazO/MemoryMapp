@@ -5,7 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,32 +23,96 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
+import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
+import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
 import java.util.*
-
-data class MediaItem(val id: Int, val isLiked: Boolean = false)
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
+import coil.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoriesScreen(onMenuClick: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    // Date state (Sync with multi-day navigation)
+    var selectedDate by remember { mutableStateOf(Calendar.getInstance()) }
+    val isToday = remember(selectedDate) {
+        val today = Calendar.getInstance()
+        selectedDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                selectedDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+    }
+
     var showSortMenu by remember { mutableStateOf(false) }
-    val currentDate = remember { SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(Date()) }
+    val dateString = remember(selectedDate) {
+        SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(selectedDate.time)
+    }
 
     val gridState = rememberLazyGridState()
 
-    // Media State
-    var mediaItems by remember { 
-        mutableStateOf((1..10).map { MediaItem(it) })
+    // Database
+    val database = remember { AppDatabase.getDatabase(context) }
+    val locationDao = database.locationDao()
+
+    val startOfDay = remember(selectedDate) {
+        val cal = selectedDate.clone() as Calendar
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        cal.timeInMillis
     }
+
+    val allMediaForDay by locationDao.getMediaInRange(startOfDay, startOfDay + 86400000)
+        .collectAsState(initial = emptyList())
 
     // Filter State
     var showPhotos by remember { mutableStateOf(true) }
     var showVideos by remember { mutableStateOf(true) }
     var onlyLiked by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf("Newest to oldest") }
+
+    val filteredMedia = remember(allMediaForDay, showPhotos, showVideos, onlyLiked, sortOrder) {
+        allMediaForDay.filter {
+            val typeMatch = (it.type == MediaType.IMAGE && showPhotos) || (it.type == MediaType.VIDEO && showVideos)
+            val likeMatch = !onlyLiked || it.isLiked
+            typeMatch && likeMatch
+        }.sortedWith { a, b ->
+            if (sortOrder == "Newest to oldest") b.timestamp.compareTo(a.timestamp)
+            else a.timestamp.compareTo(b.timestamp)
+        }
+    }
+
+    val relativeDay = remember(selectedDate) {
+        val today = Calendar.getInstance()
+        today.set(Calendar.HOUR_OF_DAY, 0)
+        today.set(Calendar.MINUTE, 0)
+        today.set(Calendar.SECOND, 0)
+        today.set(Calendar.MILLISECOND, 0)
+
+        val target = selectedDate.clone() as Calendar
+        target.set(Calendar.HOUR_OF_DAY, 0)
+        target.set(Calendar.MINUTE, 0)
+        target.set(Calendar.SECOND, 0)
+        target.set(Calendar.MILLISECOND, 0)
+
+        val diffMillis = today.timeInMillis - target.timeInMillis
+        val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()
+
+        when (diffDays) {
+            0 -> "Today"
+            1 -> "Yesterday"
+            else -> "$diffDays days ago"
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -64,11 +128,38 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = Color.White)
-                        Text("Today", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
-                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.White)
+                        IconButton(onClick = {
+                            val newCal = selectedDate.clone() as Calendar
+                            newCal.add(Calendar.DAY_OF_YEAR, -1)
+                            selectedDate = newCal
+                        }) {
+                            Icon(Icons.Default.ChevronLeft, contentDescription = "Prev", tint = Color.White)
+                        }
+                        Text(
+                            text = relativeDay,
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                        IconButton(
+                            onClick = {
+                                if (!isToday) {
+                                    val newCal = selectedDate.clone() as Calendar
+                                    newCal.add(Calendar.DAY_OF_YEAR, 1)
+                                    selectedDate = newCal
+                                }
+                            },
+                            enabled = !isToday
+                        ) {
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = "Next",
+                                tint = if (isToday) Color.White.copy(alpha = 0.3f) else Color.White
+                            )
+                        }
                     }
-                    Text(currentDate, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Text(dateString, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                 }
                 IconButton(onClick = { /* Calendar */ }) {
                     Icon(Icons.Outlined.CalendarMonth, contentDescription = "Calendar", tint = Color.White, modifier = Modifier.size(28.dp))
@@ -78,38 +169,47 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
         containerColor = Color.Black
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                state = gridState,
-                contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 80.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScrollbar(gridState)
-            ) {
-                itemsIndexed(mediaItems) { index, item ->
-                    MediaItemView(
-                        item = item,
-                        onLikeToggle = {
-                            val newList = mediaItems.toMutableList()
-                            newList[index] = item.copy(isLiked = !item.isLiked)
-                            mediaItems = newList
-                        }
-                    )
+            if (filteredMedia.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No media captured", color = Color.Gray, fontSize = 16.sp)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    state = gridState,
+                    contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 80.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScrollbar(gridState)
+                ) {
+                    items(filteredMedia, key = { it.id }) { item ->
+                        MediaItemView(
+                            item = item,
+                            onLikeToggle = {
+                                scope.launch {
+                                    locationDao.updateMediaLikeStatus(item.id, !item.isLiked)
+                                }
+                            }
+                        )
+                    }
                 }
             }
 
-            FloatingActionButton(
-                onClick = { showSortMenu = true },
-                containerColor = Color(0xFF6E6EF7),
-                contentColor = Color.White,
-                shape = CircleShape,
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(24.dp)
+                    .size(56.dp)
+                    .background(
+                        brush = Brush.horizontalGradient(listOf(GradientStart, GradientEnd)),
+                        shape = CircleShape
+                    )
+                    .clickable { showSortMenu = true },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.MoreHoriz, contentDescription = "Filter")
+                Icon(Icons.Default.MoreHoriz, contentDescription = "Filter", tint = Color.White)
             }
 
             if (showSortMenu) {
@@ -130,13 +230,20 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
 }
 
 @Composable
-fun MediaItemView(item: MediaItem, onLikeToggle: () -> Unit) {
+fun MediaItemView(item: MediaPoint, onLikeToggle: () -> Unit) {
     Box(
         modifier = Modifier
             .aspectRatio(0.8f)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.DarkGray)
     ) {
+        Image(
+            painter = rememberAsyncImagePainter(item.uri),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+
         // Heart icon at bottom right
         IconButton(
             onClick = onLikeToggle,
@@ -149,6 +256,15 @@ fun MediaItemView(item: MediaItem, onLikeToggle: () -> Unit) {
                 contentDescription = "Like",
                 tint = if (item.isLiked) Color.Red else Color.White,
                 modifier = Modifier.size(24.dp)
+            )
+        }
+        
+        if (item.type == MediaType.VIDEO) {
+            Icon(
+                Icons.Default.PlayCircle,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.8f),
+                modifier = Modifier.align(Alignment.Center).size(32.dp)
             )
         }
     }

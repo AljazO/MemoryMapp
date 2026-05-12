@@ -59,16 +59,19 @@ fun TripsScreen(onMenuClick: () -> Unit) {
             }
 
             // Add Button
-            FloatingActionButton(
-                onClick = { showAddTrip = true },
-                containerColor = Color(0xFF6E6EF7),
-                contentColor = Color.White,
-                shape = CircleShape,
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(Alignment.BottomEnd)
                     .padding(24.dp)
+                    .size(56.dp)
+                    .background(
+                        brush = Brush.horizontalGradient(listOf(GradientStart, GradientEnd)),
+                        shape = CircleShape
+                    )
+                    .clickable { showAddTrip = true },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Trip", modifier = Modifier.size(32.dp))
+                Icon(Icons.Default.Add, contentDescription = "Add Trip", tint = Color.White, modifier = Modifier.size(32.dp))
             }
 
             if (showAddTrip) {

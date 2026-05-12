@@ -88,7 +88,7 @@ fun TitleScreen(onStartClick: () -> Unit) {
         Button(
             onClick = onStartClick,
             modifier = Modifier
-                .fillMaxWidth()
+                .width(300.dp)
                 .height(64.dp),
             shape = RoundedCornerShape(32.dp),
             interactionSource = interactionSource,

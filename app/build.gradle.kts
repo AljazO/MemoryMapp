@@ -39,6 +39,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -50,6 +51,9 @@ dependencies {
     implementation(libs.google.maps.compose)
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
+    
+    // Coil for image loading
+    implementation("io.coil-kt:coil-compose:2.6.0")
     
     // Room
     implementation(libs.room.runtime)
