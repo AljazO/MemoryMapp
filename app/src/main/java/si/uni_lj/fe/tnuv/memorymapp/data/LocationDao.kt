@@ -38,4 +38,14 @@ interface LocationDao {
 
     @Query("UPDATE media_points SET isLiked = :isLiked WHERE id = :id")
     suspend fun updateMediaLikeStatus(id: String, isLiked: Boolean)
+
+    // Trip Methods
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrip(trip: Trip)
+
+    @Query("SELECT * FROM trips ORDER BY startTime DESC")
+    fun getAllTrips(): Flow<List<Trip>>
+
+    @Query("DELETE FROM trips WHERE id = :id")
+    suspend fun deleteTripById(id: Long)
 }

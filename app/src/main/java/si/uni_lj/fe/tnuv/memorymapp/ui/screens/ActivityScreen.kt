@@ -73,6 +73,7 @@ import android.content.Context
 import androidx.compose.ui.graphics.asImageBitmap
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
+import si.uni_lj.fe.tnuv.memorymapp.utils.MapUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -443,7 +444,7 @@ fun ActivityScreen(
                         // History Indicator (Red Dot)
                         if (historyIndicatorPosition != null && isSingleDay) {
                             val historyIcon = remember {
-                                BitmapDescriptorFactory.fromBitmap(createHistoryDotBitmap(context))
+                                BitmapDescriptorFactory.fromBitmap(MapUtils.createHistoryDotBitmap(context))
                             }
                             Marker(
                                 state = historyMarkerState,
@@ -457,7 +458,7 @@ fun ActivityScreen(
                         filteredMediaPoints.forEach { media ->
                             key(media.id) {
                                 val markerIcon = remember(media.type) {
-                                    BitmapDescriptorFactory.fromBitmap(createMediaBitmap(context, media.type == MediaType.VIDEO))
+                                    BitmapDescriptorFactory.fromBitmap(MapUtils.createMediaBitmap(context, media.type == MediaType.VIDEO))
                                 }
                                 Marker(
                                     state = rememberMarkerState(position = LatLng(media.latitude, media.longitude)),
@@ -1203,53 +1204,4 @@ fun SidebarItem(text: String, icon: ImageVector) {
             fontWeight = FontWeight.Medium
         )
     }
-}
-
-private fun createMediaBitmap(context: Context, isVideo: Boolean): Bitmap {
-    val size = 100
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    // White circle border
-    val paint = android.graphics.Paint().apply {
-        color = android.graphics.Color.WHITE
-        isAntiAlias = true
-    }
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-
-    // Black circle center
-    paint.color = android.graphics.Color.BLACK
-    canvas.drawCircle(size / 2f, size / 2f, size / 2.3f, paint)
-
-    // Icon
-    val iconRes = if (isVideo) android.R.drawable.presence_video_online else android.R.drawable.ic_menu_camera
-    val drawable = ResourcesCompat.getDrawable(context.resources, iconRes, null)
-    drawable?.let {
-        it.setBounds(size / 4, size / 4, (size * 3) / 4, (size * 3) / 4)
-        it.setTint(android.graphics.Color.WHITE)
-        it.draw(canvas)
-    }
-
-    return bitmap
-}
-
-private fun createHistoryDotBitmap(context: Context): Bitmap {
-    val density = context.resources.displayMetrics.density
-    val size = (16 * density).toInt() // ~16dp fixed screen size
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val center = size / 2f
-
-    // White circle border
-    val paint = android.graphics.Paint().apply {
-        color = android.graphics.Color.WHITE
-        isAntiAlias = true
-    }
-    canvas.drawCircle(center, center, size / 2.1f, paint)
-
-    // Red circle center
-    paint.color = android.graphics.Color.RED
-    canvas.drawCircle(center, center, size / 2.8f, paint)
-
-    return bitmap
 }

@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
-@Database(entities = [LocationPoint::class, MediaPoint::class], version = 3, exportSchema = false)
+@Database(entities = [LocationPoint::class, MediaPoint::class, Trip::class], version = 4, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun locationDao(): LocationDao
@@ -23,8 +23,6 @@ abstract class AppDatabase : RoomDatabase() {
                     "location_database"
                 )
                     .fallbackToDestructiveMigration(true)
-                    // Explicitly setting journal mode to WRITE_AHEAD_LOGGING can sometimes
-                    // avoid SELinux ioctl denials related to file pinning on some devices.
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                 INSTANCE = instance

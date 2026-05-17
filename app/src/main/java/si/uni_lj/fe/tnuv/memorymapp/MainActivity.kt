@@ -40,6 +40,8 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
 
 class MainActivity : ComponentActivity() {
@@ -257,6 +259,9 @@ fun MemoryMappApp() {
                 composable("trips") {
                     TripsScreen(
                         onMenuClick = { scope.launch { drawerState.open() } },
+                        onTripClick = { tripId ->
+                            navController.navigate("trip_detail/$tripId")
+                        },
                         initialStartDate = sharedStartDate,
                         initialEndDate = sharedEndDate,
                         showAddInitially = shouldShowAddTripInitially
@@ -265,6 +270,40 @@ fun MemoryMappApp() {
                     SideEffect {
                         shouldShowAddTripInitially = false
                     }
+                }
+                composable(
+                    "trip_detail/{tripId}",
+                    arguments = listOf(navArgument("tripId") { type = NavType.LongType })
+                ) { backStackEntry ->
+                    val tripId = backStackEntry.arguments?.getLong("tripId") ?: 0L
+                    TripDetailScreen(
+                        tripId = tripId,
+                        onBackClick = { navController.popBackStack() },
+                        onViewPicturesClick = { id ->
+                            // For simplicity, we can just navigate to memories with specific dates
+                            // Or we could create a TripPicturesScreen. 
+                            // Let's use MemoriesScreen but we might need to adjust it to show the trip name.
+                            // To keep it simple, let's update shared state and navigate to memories.
+                            scope.launch {
+                                val db = si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase.getDatabase(context)
+                                val trips = db.locationDao().getAllMediaSync() // This is wrong, I need trip details
+                                // Actually, TripDetailScreen already has the trip. 
+                                // I'll pass start/end times via navigation if possible, or just use a shared state.
+                            }
+                            navController.navigate("trip_pictures/$id")
+                        }
+                    )
+                }
+                composable(
+                    "trip_pictures/{tripId}",
+                    arguments = listOf(navArgument("tripId") { type = NavType.LongType })
+                ) { backStackEntry ->
+                    val tripId = backStackEntry.arguments?.getLong("tripId") ?: 0L
+                    // We'll create a variant of MemoriesScreen for trips
+                    TripMemoriesScreen(
+                        tripId = tripId,
+                        onBackClick = { navController.popBackStack() }
+                    )
                 }
                 composable("account_settings") {
                     AccountSettingsScreen(

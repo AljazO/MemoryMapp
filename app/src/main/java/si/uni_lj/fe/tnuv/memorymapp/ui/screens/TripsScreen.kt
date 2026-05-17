@@ -15,9 +15,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
+import si.uni_lj.fe.tnuv.memorymapp.data.Trip
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
@@ -28,12 +32,18 @@ import java.util.*
 @Composable
 fun TripsScreen(
     onMenuClick: () -> Unit,
+    onTripClick: (Long) -> Unit,
     initialStartDate: Calendar? = null,
     initialEndDate: Calendar? = null,
     showAddInitially: Boolean = false
 ) {
     var showAddTrip by remember { mutableStateOf(showAddInitially) }
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
+    val database = remember { AppDatabase.getDatabase(context) }
+    val locationDao = database.locationDao()
+    val trips by locationDao.getAllTrips().collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -49,20 +59,28 @@ fun TripsScreen(
                 Spacer(modifier = Modifier.weight(1f))
                 Text("My trips", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.weight(1f))
-                Box(modifier = Modifier.size(32.dp)) // Placeholder to balance
+                Box(modifier = Modifier.size(32.dp))
             }
         },
         containerColor = Color.Black
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-            // Placeholder Trip Card
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScrollbar(scrollState)
-                    .verticalScroll(scrollState)
-            ) {
-                TripItem()
+            if (trips.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No trips saved yet", color = Color.Gray)
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScrollbar(scrollState)
+                        .verticalScroll(scrollState)
+                ) {
+                    trips.forEach { trip ->
+                        TripItem(trip = trip, onClick = { onTripClick(trip.id) })
+                    }
+                    Spacer(modifier = Modifier.height(80.dp))
+                }
             }
 
             // Add Button
@@ -84,8 +102,21 @@ fun TripsScreen(
             if (showAddTrip) {
                 AddTripPanel(
                     onClose = { showAddTrip = false },
-                    startDate = initialStartDate,
-                    endDate = initialEndDate
+                    onAddTrip = { title, description, start, end ->
+                        scope.launch {
+                            locationDao.insertTrip(
+                                Trip(
+                                    title = title,
+                                    description = description,
+                                    startTime = start.timeInMillis,
+                                    endTime = end.timeInMillis
+                                )
+                            )
+                            showAddTrip = false
+                        }
+                    },
+                    initialStartDate = initialStartDate,
+                    initialEndDate = initialEndDate
                 )
             }
         }
@@ -93,11 +124,13 @@ fun TripsScreen(
 }
 
 @Composable
-fun TripItem() {
+fun TripItem(trip: Trip, onClick: () -> Unit) {
+    val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E))
     ) {
@@ -108,14 +141,21 @@ fun TripItem() {
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .background(Color.DarkGray, RoundedCornerShape(8.dp))
-            )
+                    .background(Color.DarkGray, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Map, contentDescription = null, tint = Color.Gray)
+            }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Dodano potovanje", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("24.04.2026 - 26.04.2026", color = Color.Gray, fontSize = 12.sp)
+                Text(trip.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "${sdf.format(Date(trip.startTime))} - ${sdf.format(Date(trip.endTime))}",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
             }
-            Icon(Icons.Default.MoreHoriz, contentDescription = null, tint = Color.White)
+            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.White)
         }
     }
 }
@@ -123,11 +163,17 @@ fun TripItem() {
 @Composable
 fun AddTripPanel(
     onClose: () -> Unit,
-    startDate: Calendar? = null,
-    endDate: Calendar? = null
+    onAddTrip: (String, String, Calendar, Calendar) -> Unit,
+    initialStartDate: Calendar? = null,
+    initialEndDate: Calendar? = null
 ) {
     val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
     
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    val startDate = remember { mutableStateOf(initialStartDate ?: Calendar.getInstance()) }
+    val endDate = remember { mutableStateOf(initialEndDate ?: Calendar.getInstance()) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -153,64 +199,56 @@ fun AddTripPanel(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Insert name", color = Color.White, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box(
-                            modifier = Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)
-                        ) {
-                            Text("Trip name", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
-                        Text("Cover photo", color = Color.White, fontSize = 10.sp)
-                    }
-                }
+                Text("Insert name", color = Color.White, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                TextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    placeholder = { Text("Trip name", color = Color.Gray, fontSize = 12.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF2C2C2E),
+                        unfocusedContainerColor = Color(0xFF2C2C2E),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text("Insert description", color = Color.White, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(80.dp).background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)
-                ) {
-                    Text("Custom text", color = Color.Gray, fontSize = 12.sp)
-                }
+                TextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    placeholder = { Text("Custom text", color = Color.Gray, fontSize = 12.sp) },
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF2C2C2E),
+                        unfocusedContainerColor = Color(0xFF2C2C2E),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.weight(1f)) {
-                        val dateText = if (startDate != null) sdf.format(startDate.time) else "dd.mm.yyyy"
-                        Text("Insert date", color = Color.White, fontSize = 14.sp)
+                        Text("Start Date", color = Color.White, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)) {
-                            Text(dateText, color = if (startDate != null) Color.White else Color.Gray, fontSize = 12.sp)
+                            Text(sdf.format(startDate.value.time), color = Color.White, fontSize = 12.sp)
                         }
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Insert period", color = Color.White, fontSize = 14.sp)
+                        Text("End Date", color = Color.White, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        
-                        val startPeriodText = if (startDate != null) sdf.format(startDate.time) else "dd.mm.yyyy"
-                        val endPeriodText = if (endDate != null) sdf.format(endDate.time) else "dd.mm.yyyy"
-                        
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.weight(1f).background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(8.dp)) {
-                                Text(startPeriodText, color = if (startDate != null) Color.White else Color.Gray, fontSize = 10.sp)
-                            }
-                            Text(" Start", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp))
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.weight(1f).background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(8.dp)) {
-                                Text(endPeriodText, color = if (endDate != null) Color.White else Color.Gray, fontSize = 10.sp)
-                            }
-                            Text(" End", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp).width(30.dp))
+                        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)) {
+                            Text(sdf.format(endDate.value.time), color = Color.White, fontSize = 12.sp)
                         }
                     }
                 }
@@ -218,7 +256,8 @@ fun AddTripPanel(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
-                    onClick = onClose,
+                    onClick = { onAddTrip(title, description, startDate.value, endDate.value) },
+                    enabled = title.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
