@@ -21,11 +21,18 @@ import androidx.compose.ui.unit.sp
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TripsScreen(onMenuClick: () -> Unit) {
-    var showAddTrip by remember { mutableStateOf(false) }
+fun TripsScreen(
+    onMenuClick: () -> Unit,
+    initialStartDate: Calendar? = null,
+    initialEndDate: Calendar? = null,
+    showAddInitially: Boolean = false
+) {
+    var showAddTrip by remember { mutableStateOf(showAddInitially) }
     val scrollState = rememberScrollState()
 
     Scaffold(
@@ -75,7 +82,11 @@ fun TripsScreen(onMenuClick: () -> Unit) {
             }
 
             if (showAddTrip) {
-                AddTripPanel(onClose = { showAddTrip = false })
+                AddTripPanel(
+                    onClose = { showAddTrip = false },
+                    startDate = initialStartDate,
+                    endDate = initialEndDate
+                )
             }
         }
     }
@@ -110,7 +121,13 @@ fun TripItem() {
 }
 
 @Composable
-fun AddTripPanel(onClose: () -> Unit) {
+fun AddTripPanel(
+    onClose: () -> Unit,
+    startDate: Calendar? = null,
+    endDate: Calendar? = null
+) {
+    val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -167,26 +184,31 @@ fun AddTripPanel(onClose: () -> Unit) {
 
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.weight(1f)) {
+                        val dateText = if (startDate != null) sdf.format(startDate.time) else "dd.mm.yyyy"
                         Text("Insert date", color = Color.White, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)) {
-                            Text("dd.mm.yyyy", color = Color.Gray, fontSize = 12.sp)
+                            Text(dateText, color = if (startDate != null) Color.White else Color.Gray, fontSize = 12.sp)
                         }
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Insert period", color = Color.White, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
+                        
+                        val startPeriodText = if (startDate != null) sdf.format(startDate.time) else "dd.mm.yyyy"
+                        val endPeriodText = if (endDate != null) sdf.format(endDate.time) else "dd.mm.yyyy"
+                        
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.weight(1f).background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(8.dp)) {
-                                Text("dd.mm.yyyy", color = Color.Gray, fontSize = 10.sp)
+                                Text(startPeriodText, color = if (startDate != null) Color.White else Color.Gray, fontSize = 10.sp)
                             }
                             Text(" Start", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.weight(1f).background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(8.dp)) {
-                                Text("dd.mm.yyyy", color = Color.Gray, fontSize = 10.sp)
+                                Text(endPeriodText, color = if (endDate != null) Color.White else Color.Gray, fontSize = 10.sp)
                             }
                             Text(" End", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp).width(30.dp))
                         }

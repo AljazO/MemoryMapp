@@ -108,6 +108,8 @@ fun MemoryMappApp() {
         set(Calendar.SECOND, 59)
         set(Calendar.MILLISECOND, 999)
     }) }
+    
+    var shouldShowAddTripInitially by remember { mutableStateOf(false) }
 
     // Handle Notification Permission for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -230,6 +232,10 @@ fun MemoryMappApp() {
                         onPeriodChange = { start, end ->
                             sharedStartDate = start
                             sharedEndDate = end
+                        },
+                        onAddTrip = {
+                            shouldShowAddTripInitially = true
+                            navController.navigate("trips")
                         }
                     )
                 }
@@ -241,11 +247,24 @@ fun MemoryMappApp() {
                         onPeriodChange = { start, end ->
                             sharedStartDate = start
                             sharedEndDate = end
+                        },
+                        onAddTrip = {
+                            shouldShowAddTripInitially = true
+                            navController.navigate("trips")
                         }
                     )
                 }
                 composable("trips") {
-                    TripsScreen(onMenuClick = { scope.launch { drawerState.open() } })
+                    TripsScreen(
+                        onMenuClick = { scope.launch { drawerState.open() } },
+                        initialStartDate = sharedStartDate,
+                        initialEndDate = sharedEndDate,
+                        showAddInitially = shouldShowAddTripInitially
+                    )
+                    // Reset flag after use
+                    SideEffect {
+                        shouldShowAddTripInitially = false
+                    }
                 }
                 composable("account_settings") {
                     AccountSettingsScreen(

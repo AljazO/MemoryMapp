@@ -47,7 +47,8 @@ fun MemoriesScreen(
     onMenuClick: () -> Unit,
     startDate: Calendar,
     endDate: Calendar,
-    onPeriodChange: (Calendar, Calendar) -> Unit
+    onPeriodChange: (Calendar, Calendar) -> Unit,
+    onAddTrip: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -251,6 +252,7 @@ fun MemoriesScreen(
                         
                         onPeriodChange(start, end)
                     },
+                    onAddTrip = onAddTrip,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 80.dp)

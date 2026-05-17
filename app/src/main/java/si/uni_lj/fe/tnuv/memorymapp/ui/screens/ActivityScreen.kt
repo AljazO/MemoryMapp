@@ -82,7 +82,8 @@ fun ActivityScreen(
     onToggleTracking: (Boolean) -> Unit,
     startDate: Calendar,
     endDate: Calendar,
-    onPeriodChange: (Calendar, Calendar) -> Unit
+    onPeriodChange: (Calendar, Calendar) -> Unit,
+    onAddTrip: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -564,6 +565,7 @@ fun ActivityScreen(
                         
                         onPeriodChange(start, end)
                     },
+                    onAddTrip = onAddTrip,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 60.dp)
