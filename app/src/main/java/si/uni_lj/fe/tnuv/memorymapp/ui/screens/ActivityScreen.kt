@@ -60,6 +60,7 @@ import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.Marker
 import android.graphics.Bitmap
@@ -70,29 +71,41 @@ import coil.compose.rememberAsyncImagePainter
 import android.net.Uri
 import android.content.Context
 import androidx.compose.ui.graphics.asImageBitmap
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTracking: (Boolean) -> Unit) {
+fun ActivityScreen(
+    onMenuClick: () -> Unit,
+    isTracking: Boolean,
+    onToggleTracking: (Boolean) -> Unit,
+    startDate: Calendar,
+    endDate: Calendar,
+    onPeriodChange: (Calendar, Calendar) -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Date state
-    var selectedDate by remember { mutableStateOf(Calendar.getInstance()) }
-    val isToday = remember(selectedDate) {
+    val isSingleDay = remember(startDate, endDate) {
+        startDate.get(Calendar.YEAR) == endDate.get(Calendar.YEAR) &&
+                startDate.get(Calendar.DAY_OF_YEAR) == endDate.get(Calendar.DAY_OF_YEAR)
+    }
+
+    val isToday = remember(startDate, endDate) {
         val today = Calendar.getInstance()
-        selectedDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-                selectedDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+        isSingleDay &&
+                startDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                startDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
     }
 
     // Database and DAO
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
 
-    // Path points from database for selected date
-    val startOfDay = remember(selectedDate) {
-        val cal = selectedDate.clone() as Calendar
+    val startTimeMillis = remember(startDate) {
+        val cal = startDate.clone() as Calendar
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
@@ -100,10 +113,19 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         cal.timeInMillis
     }
 
-    val allPointsForDay by locationDao.getPointsInRange(startOfDay, startOfDay + 86400000)
+    val endTimeMillis = remember(endDate) {
+        val cal = endDate.clone() as Calendar
+        cal.set(Calendar.HOUR_OF_DAY, 23)
+        cal.set(Calendar.MINUTE, 59)
+        cal.set(Calendar.SECOND, 59)
+        cal.set(Calendar.MILLISECOND, 999)
+        cal.timeInMillis
+    }
+
+    val allPointsForPeriod by locationDao.getPointsInRange(startTimeMillis, endTimeMillis)
         .collectAsState(initial = emptyList())
 
-    val mediaPointsForDay by locationDao.getMediaInRange(startOfDay, startOfDay + 86400000)
+    val mediaPointsForPeriod by locationDao.getMediaInRange(startTimeMillis, endTimeMillis)
         .collectAsState(initial = emptyList())
 
     // Media Scanning logic
@@ -197,7 +219,7 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
     var sliderValue by remember { mutableFloatStateOf(initialMinutes) }
 
     // Reset slider when date changes
-    LaunchedEffect(selectedDate) {
+    LaunchedEffect(startDate, endDate) {
         if (isToday) {
             sliderValue = currentMinutesOfToday
         } else {
@@ -206,19 +228,31 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
     }
 
     // Filter points based on slider
-    val pastPathPoints = remember(allPointsForDay, sliderValue) {
-        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
-        allPointsForDay.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+    val pastPathPoints = remember(allPointsForPeriod, sliderValue, isSingleDay) {
+        if (isSingleDay) {
+            val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
+            allPointsForPeriod.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+        } else {
+            allPointsForPeriod.map { LatLng(it.latitude, it.longitude) }
+        }
     }
 
-    val filteredMediaPoints = remember(mediaPointsForDay, sliderValue) {
-        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
-        mediaPointsForDay.filter { it.timestamp <= maxTimestamp }
+    val filteredMediaPoints = remember(mediaPointsForPeriod, sliderValue, isSingleDay) {
+        if (isSingleDay) {
+            val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
+            mediaPointsForPeriod.filter { it.timestamp <= maxTimestamp }
+        } else {
+            mediaPointsForPeriod
+        }
     }
 
-    val futurePathPoints = remember(allPointsForDay, sliderValue) {
-        val maxTimestamp = startOfDay + (sliderValue * 60 * 1000).toLong()
-        allPointsForDay.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+    val futurePathPoints = remember(allPointsForPeriod, sliderValue, isSingleDay) {
+        if (isSingleDay) {
+            val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
+            allPointsForPeriod.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
+        } else {
+            emptyList()
+        }
     }
 
     val historyIndicatorPosition = remember(pastPathPoints) {
@@ -236,28 +270,21 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         }
     }
 
-    // Handle resume: Refresh time, jump to live if tracking, and scan media
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                val c = Calendar.getInstance()
-                currentMinutesOfToday = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)).toFloat()
-                if (isTracking && isToday) {
-                    sliderValue = currentMinutesOfToday
-                }
-                
-                // Scan media on resume to pick up new photos
-                if (hasMediaPermission) {
-                    scope.launch {
-                        mediaScanner.scanGallery()
-                    }
-                }
+    // Handle resume safely using LifecycleResumeEffect with a key
+    LifecycleResumeEffect(Unit) {
+        val c = Calendar.getInstance()
+        currentMinutesOfToday = (c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)).toFloat()
+        if (isTracking && isToday) {
+            sliderValue = currentMinutesOfToday
+        }
+        
+        if (hasMediaPermission) {
+            scope.launch {
+                mediaScanner.scanGallery()
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        
+        onPauseOrDispose { }
     }
 
     LaunchedEffect(Unit) {
@@ -314,41 +341,47 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
         }
     }
 
-    // Auto-follow history indicator when sliding to the past
-    LaunchedEffect(historyIndicatorPosition, isLiveTime, isUserInteracting) {
-        if (!isLiveTime && historyIndicatorPosition != null && !isUserInteracting) {
-            cameraPositionState.animate(
-                CameraUpdateFactory.newLatLng(historyIndicatorPosition),
-                400
-            )
-        }
-    }
+    // Marker state for the history red dot
+    val historyMarkerState = rememberMarkerState()
 
-    // Auto-follow current location if tracking and not interacting
-    LaunchedEffect(allPointsForDay, isUserInteracting, isTracking, isToday) {
-        if (isTracking && isToday && !isUserInteracting && allPointsForDay.isNotEmpty()) {
-            val lastPoint = allPointsForDay.last()
-            val lastLatLng = LatLng(lastPoint.latitude, lastPoint.longitude)
-            cameraPositionState.animate(CameraUpdateFactory.newLatLng(lastLatLng))
+    // Unified logic to follow history dot and update marker
+    LaunchedEffect(historyIndicatorPosition, isUserInteracting, isLiveTime, isTracking, isToday) {
+        historyIndicatorPosition?.let { pos ->
+            historyMarkerState.position = pos
+            
+            if (!isUserInteracting) {
+                if (isToday && isLiveTime && isTracking) {
+                    // Smoothly follow active tracking at live time
+                    cameraPositionState.animate(CameraUpdateFactory.newLatLng(pos))
+                } else {
+                    // Instantly snap map to location when scrubbing through history
+                    cameraPositionState.move(CameraUpdateFactory.newLatLng(pos))
+                }
+            }
         }
     }
 
     Scaffold(
         topBar = {
             ActivityTopBar(
-                selectedDate = selectedDate,
+                startDate = startDate,
+                endDate = endDate,
                 onMenuClick = onMenuClick,
                 onCalendarClick = { showCalendar = true },
                 onPrevDay = {
-                    val newCal = selectedDate.clone() as Calendar
-                    newCal.add(Calendar.DAY_OF_YEAR, -1)
-                    selectedDate = newCal
+                    val newStart = startDate.clone() as Calendar
+                    newStart.add(Calendar.DAY_OF_YEAR, -1)
+                    val newEnd = endDate.clone() as Calendar
+                    newEnd.add(Calendar.DAY_OF_YEAR, -1)
+                    onPeriodChange(newStart, newEnd)
                 },
                 onNextDay = {
                     if (!isToday) {
-                        val newCal = selectedDate.clone() as Calendar
-                        newCal.add(Calendar.DAY_OF_YEAR, 1)
-                        selectedDate = newCal
+                        val newStart = startDate.clone() as Calendar
+                        newStart.add(Calendar.DAY_OF_YEAR, 1)
+                        val newEnd = endDate.clone() as Calendar
+                        newEnd.add(Calendar.DAY_OF_YEAR, 1)
+                        onPeriodChange(newStart, newEnd)
                     }
                 }
             )
@@ -406,13 +439,13 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                             )
                         }
 
-                        // History Indicator
-                        if (historyIndicatorPosition != null && !isLiveTime) {
+                        // History Indicator (Red Dot)
+                        if (historyIndicatorPosition != null && isSingleDay) {
                             val historyIcon = remember {
                                 BitmapDescriptorFactory.fromBitmap(createHistoryDotBitmap(context))
                             }
                             Marker(
-                                state = rememberMarkerState(position = historyIndicatorPosition),
+                                state = historyMarkerState,
                                 icon = historyIcon,
                                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
                                 flat = true
@@ -510,218 +543,235 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                 }
             }
 
-            // Time slider bar
-            Card(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 60.dp)
-                    .fillMaxWidth()
-                    .height(106.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f))
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    val hours = (sliderValue / 60).toInt()
-                    val minutes = (sliderValue % 60).toInt()
-                    val timeString = "%02d:%02d".format(hours, minutes)
+            // Selection Info Bar - Shown when not "today"
+            if (!isToday) {
+                SelectionInfoBar(
+                    startDate = startDate,
+                    endDate = endDate,
+                    onClear = {
+                        val now = Calendar.getInstance()
+                        val start = now.clone() as Calendar
+                        start.set(Calendar.HOUR_OF_DAY, 0)
+                        start.set(Calendar.MINUTE, 0)
+                        start.set(Calendar.SECOND, 0)
+                        start.set(Calendar.MILLISECOND, 0)
+                        
+                        val end = now.clone() as Calendar
+                        end.set(Calendar.HOUR_OF_DAY, 23)
+                        end.set(Calendar.MINUTE, 59)
+                        end.set(Calendar.SECOND, 59)
+                        end.set(Calendar.MILLISECOND, 999)
+                        
+                        onPeriodChange(start, end)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 60.dp)
+                )
+            }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+            // Time slider bar - Only show for single day
+            if (isSingleDay) {
+                val sliderPadding = if (!isToday) 110.dp else 60.dp
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp, vertical = sliderPadding)
+                        .fillMaxWidth()
+                        .height(86.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f))
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        // Left buttons
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TimeAdjustmentButton("-1H") {
-                                sliderValue = (sliderValue - 60).coerceAtLeast(0f)
-                            }
-                            TimeAdjustmentButton("-1M") {
-                                sliderValue = (sliderValue - 1).coerceAtLeast(0f)
+                        val hours = (sliderValue / 60).toInt()
+                        val minutes = (sliderValue % 60).toInt()
+                        val timeString = "%02d:%02d".format(hours, minutes)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                timeString,
+                                color = Color(0xFF6E6EF7),
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    hourInput = "%02d".format(hours)
+                                    minuteInput = "%02d".format(minutes)
+                                    showTimeEntry = true
+                                }
+                            )
+                            if (isToday) {
+                                IconButton(
+                                    onClick = { 
+                                        sliderValue = currentMinutesOfToday
+                                        isUserInteracting = false
+                                    },
+                                    modifier = Modifier.size(24.dp).padding(start = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Restore,
+                                        contentDescription = "Reset to current time",
+                                        tint = Color(0xFF6E6EF7),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
 
-                        // Center Time and Reset
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        timeString,
-                                        color = Color(0xFF6E6EF7),
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.clickable {
-                                            hourInput = "%02d".format(hours)
-                                            minuteInput = "%02d".format(minutes)
-                                            showTimeEntry = true
-                                        }
-                                    )
-                                    if (isToday) {
-                                        IconButton(
-                                            onClick = { sliderValue = currentMinutesOfToday },
-                                            modifier = Modifier.size(24.dp).padding(start = 4.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Restore,
-                                                contentDescription = "Reset to current time",
-                                                tint = Color(0xFF6E6EF7),
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                        // Direct Time Entry Dialog
+                        if (showTimeEntry) {
+                            val focusRequesterHours = remember { FocusRequester() }
+                            val focusRequesterMinutes = remember { FocusRequester() }
 
-                                // Direct Time Entry Dialog
-                                if (showTimeEntry) {
-                                    val focusRequesterHours = remember { FocusRequester() }
-                                    val focusRequesterMinutes = remember { FocusRequester() }
-
-                                    Dialog(
-                                        onDismissRequest = { showTimeEntry = false },
-                                        properties = DialogProperties(usePlatformDefaultWidth = false)
+                            Dialog(
+                                onDismissRequest = { showTimeEntry = false },
+                                properties = DialogProperties(usePlatformDefaultWidth = false)
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().clickable { showTimeEntry = false }.padding(bottom = 260.dp),
+                                    contentAlignment = Alignment.BottomCenter
+                                ) {
+                                    Card(
+                                        modifier = Modifier.width(180.dp).clickable(enabled = false) { },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
+                                        elevation = CardDefaults.cardElevation(8.dp)
                                     ) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize().clickable { showTimeEntry = false }.padding(bottom = 260.dp),
-                                            contentAlignment = Alignment.BottomCenter
+                                        Column(
+                                            modifier = Modifier.padding(16.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
                                         ) {
-                                            Card(
-                                                modifier = Modifier.width(180.dp).clickable(enabled = false) { },
-                                                shape = RoundedCornerShape(16.dp),
-                                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
-                                                elevation = CardDefaults.cardElevation(8.dp)
+                                            Text("Set Time", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Spacer(modifier = Modifier.height(16.dp))
+
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
                                             ) {
-                                                Column(
-                                                    modifier = Modifier.padding(16.dp),
-                                                    horizontalAlignment = Alignment.CenterHorizontally
-                                                ) {
-                                                    Text("Set Time", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                // HOURS
+                                                OutlinedTextField(
+                                                    value = hourInput,
+                                                    onValueChange = {
+                                                        val digits = it.filter { c -> c.isDigit() }.take(2)
+                                                        val value = digits.toIntOrNull()
 
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.Center
-                                                    ) {
-                                                        // HOURS
-                                                        OutlinedTextField(
-                                                            value = hourInput,
-                                                            onValueChange = {
-                                                                val digits = it.filter { c -> c.isDigit() }.take(2)
-                                                                val value = digits.toIntOrNull()
-
-                                                                if (value == null || value <= 23) {
-                                                                    hourInput = digits
-                                                                }
-
-                                                                if (digits.length == 2) {
-                                                                    focusRequesterMinutes.requestFocus()
-                                                                }
-                                                            },
-                                                            placeholder = { Text("_ _", color = Color.Gray) },
-                                                            textStyle = TextStyle(
-                                                                color = Color.White,
-                                                                textAlign = TextAlign.Center,
-                                                                fontSize = 20.sp,
-                                                                fontWeight = FontWeight.Bold
-                                                            ),
-                                                            colors = OutlinedTextFieldDefaults.colors(
-                                                                focusedBorderColor = Color(0xFF6E6EF7),
-                                                                unfocusedBorderColor = Color.Gray,
-                                                                cursorColor = Color(0xFF6E6EF7)
-                                                            ),
-                                                            singleLine = true,
-                                                            modifier = Modifier
-                                                                .width(65.dp)
-                                                                .focusRequester(focusRequesterHours),
-                                                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                                                            )
-                                                        )
-
-                                                        Text(
-                                                            ":",
-                                                            color = Color.White,
-                                                            fontSize = 20.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            modifier = Modifier.padding(horizontal = 4.dp)
-                                                        )
-
-                                                        // MINUTES
-                                                        OutlinedTextField(
-                                                            value = minuteInput,
-                                                            onValueChange = {
-                                                                val digits = it.filter { c -> c.isDigit() }.take(2)
-                                                                val value = digits.toIntOrNull()
-
-                                                                if (value == null || value <= 59) {
-                                                                    minuteInput = digits
-                                                                }
-                                                            },
-                                                            placeholder = { Text("_ _", color = Color.Gray) },
-                                                            textStyle = TextStyle(
-                                                                color = Color.White,
-                                                                textAlign = TextAlign.Center,
-                                                                fontSize = 20.sp,
-                                                                fontWeight = FontWeight.Bold
-                                                            ),
-                                                            colors = OutlinedTextFieldDefaults.colors(
-                                                                focusedBorderColor = Color(0xFF6E6EF7),
-                                                                unfocusedBorderColor = Color.Gray,
-                                                                cursorColor = Color(0xFF6E6EF7)
-                                                            ),
-                                                            singleLine = true,
-                                                            modifier = Modifier
-                                                                .width(65.dp)
-                                                                .focusRequester(focusRequesterMinutes)
-                                                                .onKeyEvent { event ->
-                                                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace && minuteInput.isEmpty()) {
-                                                                        focusRequesterHours.requestFocus()
-                                                                        if (hourInput.isNotEmpty()) {
-                                                                            hourInput = hourInput.dropLast(1)
-                                                                        }
-                                                                        true
-                                                                    } else {
-                                                                        false
-                                                                    }
-                                                                },
-                                                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                                                            )
-                                                        )
-                                                    }
-
-                                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                                    Button(
-                                                        onClick = {
-                                                            val h = hourInput.toIntOrNull() ?: 0
-                                                            val m = minuteInput.toIntOrNull() ?: 0
-
-                                                            if (h < 24 && m < 60) {
-                                                                val requestedMinutes = (h * 60 + m).toFloat()
-                                                                sliderValue = if (isToday) {
-                                                                    requestedMinutes.coerceIn(0f, currentMinutesOfToday)
-                                                                } else {
-                                                                    requestedMinutes.coerceIn(0f, 1440f)
-                                                                }
-                                                            }
-                                                            showTimeEntry = false
-                                                        },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                                                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                                                        shape = RoundedCornerShape(10.dp),
-                                                        contentPadding = PaddingValues(0.dp)
-                                                    ) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .fillMaxSize()
-                                                                .background(Brush.horizontalGradient(listOf(GradientStart, GradientEnd))),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Text("Confirm", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                                        if (value == null || value <= 23) {
+                                                            hourInput = digits
                                                         }
+
+                                                        if (digits.length == 2) {
+                                                            focusRequesterMinutes.requestFocus()
+                                                        }
+                                                    },
+                                                    placeholder = { Text("_ _", color = Color.Gray) },
+                                                    textStyle = TextStyle(
+                                                        color = Color.White,
+                                                        textAlign = TextAlign.Center,
+                                                        fontSize = 20.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    ),
+                                                    colors = OutlinedTextFieldDefaults.colors(
+                                                        focusedBorderColor = Color(0xFF6E6EF7),
+                                                        unfocusedBorderColor = Color.Gray,
+                                                        cursorColor = Color(0xFF6E6EF7)
+                                                    ),
+                                                    singleLine = true,
+                                                    modifier = Modifier
+                                                        .width(65.dp)
+                                                        .focusRequester(focusRequesterHours),
+                                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                                    )
+                                                )
+
+                                                Text(
+                                                    ":",
+                                                    color = Color.White,
+                                                    fontSize = 20.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                                )
+
+                                                // MINUTES
+                                                OutlinedTextField(
+                                                    value = minuteInput,
+                                                    onValueChange = {
+                                                        val digits = it.filter { c -> c.isDigit() }.take(2)
+                                                        val value = digits.toIntOrNull()
+
+                                                        if (value == null || value <= 59) {
+                                                            minuteInput = digits
+                                                        }
+                                                    },
+                                                    placeholder = { Text("_ _", color = Color.Gray) },
+                                                    textStyle = TextStyle(
+                                                        color = Color.White,
+                                                        textAlign = TextAlign.Center,
+                                                        fontSize = 20.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    ),
+                                                    colors = OutlinedTextFieldDefaults.colors(
+                                                        focusedBorderColor = Color(0xFF6E6EF7),
+                                                        unfocusedBorderColor = Color.Gray,
+                                                        cursorColor = Color(0xFF6E6EF7)
+                                                    ),
+                                                    singleLine = true,
+                                                    modifier = Modifier
+                                                        .width(65.dp)
+                                                        .focusRequester(focusRequesterMinutes)
+                                                        .onKeyEvent { event ->
+                                                            if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace && minuteInput.isEmpty()) {
+                                                                focusRequesterHours.requestFocus()
+                                                                if (hourInput.isNotEmpty()) {
+                                                                    hourInput = hourInput.dropLast(1)
+                                                                }
+                                                                true
+                                                            } else {
+                                                                false
+                                                            }
+                                                        },
+                                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                                    )
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(16.dp))
+
+                                            Button(
+                                                onClick = {
+                                                    val h = hourInput.toIntOrNull() ?: 0
+                                                    val m = minuteInput.toIntOrNull() ?: 0
+
+                                                    if (h < 24 && m < 60) {
+                                                        val requestedMinutes = (h * 60 + m).toFloat()
+                                                        sliderValue = if (isToday) {
+                                                            requestedMinutes.coerceIn(0f, currentMinutesOfToday)
+                                                        } else {
+                                                            requestedMinutes.coerceIn(0f, 1440f)
+                                                        }
+                                                        isUserInteracting = false
                                                     }
+                                                    showTimeEntry = false
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                                shape = RoundedCornerShape(10.dp),
+                                                contentPadding = PaddingValues(0.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(Brush.horizontalGradient(listOf(GradientStart, GradientEnd))),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text("Confirm", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
@@ -730,42 +780,31 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                             }
                         }
 
-                        // Right buttons
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TimeAdjustmentButton("+1M") {
+                        Slider(
+                            value = sliderValue,
+                            onValueChange = { newValue ->
                                 val max = if (isToday) currentMinutesOfToday else 1440f
-                                sliderValue = (sliderValue + 1).coerceAtMost(max)
-                            }
-                            TimeAdjustmentButton("+1H") {
-                                val max = if (isToday) currentMinutesOfToday else 1440f
-                                sliderValue = (sliderValue + 60).coerceAtMost(max)
-                            }
+                                sliderValue = newValue.coerceAtMost(max)
+                                isUserInteracting = false // Force map to follow history dot during scrolling
+                            },
+                            valueRange = 0f..1440f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF6E6EF7),
+                                activeTrackColor = Color(0xFF6E6EF7),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                                activeTickColor = Color.Transparent,
+                                inactiveTickColor = Color.Transparent
+                            ),
+                            modifier = Modifier.height(32.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("00:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                            Text("24:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                         }
-                    }
-
-                    Slider(
-                        value = sliderValue,
-                        onValueChange = { newValue ->
-                            val max = if (isToday) currentMinutesOfToday else 1440f
-                            sliderValue = newValue.coerceAtMost(max)
-                        },
-                        valueRange = 0f..1440f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF6E6EF7),
-                            activeTrackColor = Color(0xFF6E6EF7),
-                            inactiveTrackColor = Color.White.copy(alpha = 0.2f),
-                            activeTickColor = Color.Transparent,
-                            inactiveTickColor = Color.Transparent
-                        ),
-                        modifier = Modifier.height(32.dp)
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("00:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                        Text("24:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                     }
                 }
             }
@@ -843,162 +882,21 @@ fun ActivityScreen(onMenuClick: () -> Unit, isTracking: Boolean, onToggleTrackin
                         contentAlignment = Alignment.Center
                     ) {
                         CalendarWindow(
+                            initialStartDate = startDate,
+                            initialEndDate = endDate,
                             modifier = Modifier
                                 .padding(24.dp)
                                 .clickable(enabled = false) { },
-                            onClose = { showCalendar = false }
+                            onClose = { showCalendar = false },
+                            onPeriodSelected = { start, end ->
+                                onPeriodChange(start, end)
+                                showCalendar = false
+                            }
                         )
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-fun CalendarWindow(modifier: Modifier = Modifier, onClose: () -> Unit) {
-    val calendar = remember { Calendar.getInstance() }
-    val monthName = remember { calendar.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale.ENGLISH) }
-    val year = remember { calendar.get(Calendar.YEAR) }
-    val today = remember { calendar.get(Calendar.DAY_OF_MONTH) }
-
-    val daysInMonth = remember { calendar.getActualMaximum(Calendar.DAY_OF_MONTH) }
-
-    val firstDayOfWeekOffset = remember {
-        val c = calendar.clone() as Calendar
-        c.set(Calendar.DAY_OF_MONTH, 1)
-        val dayOfWeek = c.get(Calendar.DAY_OF_WEEK)
-        if (dayOfWeek == Calendar.SUNDAY) 6 else dayOfWeek - 2
-    }
-
-    val prevMonthDays = remember {
-        val c = calendar.clone() as Calendar
-        c.add(Calendar.MONTH, -1)
-        c.getActualMaximum(Calendar.DAY_OF_MONTH)
-    }
-
-    val dates = remember {
-        val list = mutableListOf<Pair<Int, Boolean>>()
-        for (i in (prevMonthDays - firstDayOfWeekOffset + 1)..prevMonthDays) {
-            list.add(i to false)
-        }
-        for (i in 1..daysInMonth) {
-            list.add(i to true)
-        }
-        val remaining = 42 - list.size
-        for (i in 1..remaining) {
-            list.add(i to false)
-        }
-        list
-    }
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E))
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "$monthName, $year",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.White)
-                }
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-                days.forEach { day ->
-                    Text(
-                        text = day,
-                        color = Color.Gray,
-                        fontSize = 12.sp,
-                        modifier = Modifier.width(40.dp),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(7),
-                modifier = Modifier.height(240.dp),
-                userScrollEnabled = false
-            ) {
-                items(dates) { (day, isCurrentMonth) ->
-                    val isToday = isCurrentMonth && day == today
-                    Box(
-                        modifier = Modifier
-                            .padding(2.dp)
-                            .aspectRatio(1f)
-                            .background(
-                                color = if (isToday) Color(0xFF6E6EF7) else Color(0xFF2C2C2E),
-                                shape = RoundedCornerShape(8.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = day.toString(),
-                            color = if (isCurrentMonth) Color.White else Color.Gray.copy(alpha = 0.5f),
-                            fontSize = 14.sp,
-                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Insert date", color = Color.White, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    CalendarInputField(placeholder = "dd.mm.yyyy")
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Insert period", color = Color.White, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CalendarInputField(placeholder = "dd.mm.yyyy", modifier = Modifier.weight(1f))
-                        Text(" Start", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp))
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CalendarInputField(placeholder = "dd.mm.yyyy", modifier = Modifier.weight(1f))
-                        Text(" End", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp).width(30.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CalendarInputField(placeholder: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Text(text = placeholder, color = Color.Gray, fontSize = 12.sp)
     }
 }
 
@@ -1037,23 +935,6 @@ fun StatisticsWindow(modifier: Modifier = Modifier, onClose: () -> Unit) {
 }
 
 @Composable
-fun TimeAdjustmentButton(text: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        color = Color.Transparent,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.padding(horizontal = 2.dp)
-    ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = text, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
 fun StatItem(label: String, value: String, icon: ImageVector?, iconTint: Color = Color(0xFF6E6EF7)) {
     Column(
         modifier = Modifier.width(90.dp),
@@ -1086,46 +967,58 @@ fun ZoomButton(icon: ImageVector, iconTint: Color = Color.Black, onClick: () -> 
 
 @Composable
 fun ActivityTopBar(
-    selectedDate: Calendar,
+    startDate: Calendar,
+    endDate: Calendar,
     onMenuClick: () -> Unit,
     onCalendarClick: () -> Unit,
     onPrevDay: () -> Unit,
     onNextDay: () -> Unit
 ) {
-    val dateString = remember(selectedDate) {
-        SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).format(selectedDate.time)
+    val isSingleDay = remember(startDate, endDate) {
+        startDate.get(Calendar.YEAR) == endDate.get(Calendar.YEAR) &&
+                startDate.get(Calendar.DAY_OF_YEAR) == endDate.get(Calendar.DAY_OF_YEAR)
     }
 
-    val dayOfWeek = remember(selectedDate) {
-        SimpleDateFormat("EEEE", Locale.ENGLISH).format(selectedDate.time)
-    }
+    val displayString = remember(startDate, endDate, isSingleDay) {
+        if (isSingleDay) {
+            val today = Calendar.getInstance()
+            today.set(Calendar.HOUR_OF_DAY, 0)
+            today.set(Calendar.MINUTE, 0)
+            today.set(Calendar.SECOND, 0)
+            today.set(Calendar.MILLISECOND, 0)
 
-    val isToday = remember(selectedDate) {
-        val today = Calendar.getInstance()
-        selectedDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-                selectedDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
-    }
+            val target = startDate.clone() as Calendar
+            target.set(Calendar.HOUR_OF_DAY, 0)
+            target.set(Calendar.MINUTE, 0)
+            target.set(Calendar.SECOND, 0)
+            target.set(Calendar.MILLISECOND, 0)
 
-    val relativeDay = remember(selectedDate) {
-        val today = Calendar.getInstance()
-        today.set(Calendar.HOUR_OF_DAY, 0)
-        today.set(Calendar.MINUTE, 0)
-        today.set(Calendar.SECOND, 0)
-        today.set(Calendar.MILLISECOND, 0)
+            val diffMillis = today.timeInMillis - target.timeInMillis
+            val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()
 
-        val target = selectedDate.clone() as Calendar
-        target.set(Calendar.HOUR_OF_DAY, 0)
-        target.set(Calendar.MINUTE, 0)
-        target.set(Calendar.SECOND, 0)
-        target.set(Calendar.MILLISECOND, 0)
-
-        val diffMillis = today.timeInMillis - target.timeInMillis
-
-        when (val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()) {
-            0 -> "Today"
-            1 -> "Yesterday"
-            else -> "$diffDays days ago"
+            when (diffDays) {
+                0 -> "Today"
+                1 -> "Yesterday"
+                else -> SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).format(startDate.time)
+            }
+        } else {
+            val sdf = SimpleDateFormat("MMM d", Locale.ENGLISH)
+            "${sdf.format(startDate.time)} - ${sdf.format(endDate.time)}"
         }
+    }
+
+    val dateDetails = remember(startDate, endDate, isSingleDay) {
+        if (isSingleDay) {
+            SimpleDateFormat("MMMM d, yyyy | EEEE", Locale.ENGLISH).format(startDate.time)
+        } else {
+            SimpleDateFormat("yyyy", Locale.ENGLISH).format(startDate.time)
+        }
+    }
+
+    val isToday = remember(startDate, endDate) {
+        val today = Calendar.getInstance()
+        startDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                startDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
     }
 
     Row(
@@ -1142,15 +1035,15 @@ fun ActivityTopBar(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.height(32.dp) // Explicitly limit height of the < Today > row
+                modifier = Modifier.height(32.dp)
             ) {
                 IconButton(onClick = onPrevDay) {
-                    Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = "Previous Day", tint = Color.White)
+                    Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = "Previous", tint = Color.White)
                 }
                 Text(
-                    text = relativeDay,
+                    text = displayString,
                     color = Color.White,
-                    fontSize = 20.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
@@ -1160,22 +1053,16 @@ fun ActivityTopBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Next Day",
+                        contentDescription = "Next",
                         tint = if (isToday) Color.White.copy(alpha = 0.3f) else Color.White
                     )
                 }
             }
             Text(
-                text = dateString,
+                text = dateDetails,
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
-                modifier = Modifier.offset(y = (-4).dp) // Pull up closer to the row above
-            )
-            Text(
-                text = dayOfWeek,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                modifier = Modifier.offset(y = (-8).dp) // Pull up even closer
+                modifier = Modifier.offset(y = (-4).dp)
             )
         }
 
@@ -1358,8 +1245,8 @@ private fun createHistoryDotBitmap(context: Context): Bitmap {
     }
     canvas.drawCircle(center, center, size / 2.1f, paint)
 
-    // Blue circle center
-    paint.color = android.graphics.Color.parseColor("#4A90E2")
+    // Red circle center
+    paint.color = android.graphics.Color.RED
     canvas.drawCircle(center, center, size / 2.8f, paint)
 
     return bitmap

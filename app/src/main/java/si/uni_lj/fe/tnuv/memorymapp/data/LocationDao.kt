@@ -27,6 +27,9 @@ interface LocationDao {
     @Query("SELECT * FROM media_points WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp ASC")
     fun getMediaInRange(startTime: Long, endTime: Long): Flow<List<MediaPoint>>
 
+    @Query("SELECT * FROM media_points")
+    suspend fun getAllMediaSync(): List<MediaPoint>
+
     @Query("SELECT id FROM media_points")
     suspend fun getAllMediaIds(): List<String>
 

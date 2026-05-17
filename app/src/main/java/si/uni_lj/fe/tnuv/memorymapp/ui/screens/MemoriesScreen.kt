@@ -24,10 +24,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
@@ -39,21 +43,56 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MemoriesScreen(onMenuClick: () -> Unit) {
+fun MemoriesScreen(
+    onMenuClick: () -> Unit,
+    startDate: Calendar,
+    endDate: Calendar,
+    onPeriodChange: (Calendar, Calendar) -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // Date state (Sync with multi-day navigation)
-    var selectedDate by remember { mutableStateOf(Calendar.getInstance()) }
-    val isToday = remember(selectedDate) {
+    val isSingleDay = remember(startDate, endDate) {
+        startDate.get(Calendar.YEAR) == endDate.get(Calendar.YEAR) &&
+                startDate.get(Calendar.DAY_OF_YEAR) == endDate.get(Calendar.DAY_OF_YEAR)
+    }
+
+    val isToday = remember(startDate, endDate) {
         val today = Calendar.getInstance()
-        selectedDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-                selectedDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+        isSingleDay &&
+                startDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                startDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
     }
 
     var showSortMenu by remember { mutableStateOf(false) }
-    val dateString = remember(selectedDate) {
-        SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(selectedDate.time)
+    var showCalendar by remember { mutableStateOf(false) }
+
+    val displayString = remember(startDate, endDate, isSingleDay) {
+        if (isSingleDay) {
+            val today = Calendar.getInstance()
+            today.set(Calendar.HOUR_OF_DAY, 0)
+            today.set(Calendar.MINUTE, 0)
+            today.set(Calendar.SECOND, 0)
+            today.set(Calendar.MILLISECOND, 0)
+
+            val target = startDate.clone() as Calendar
+            target.set(Calendar.HOUR_OF_DAY, 0)
+            target.set(Calendar.MINUTE, 0)
+            target.set(Calendar.SECOND, 0)
+            target.set(Calendar.MILLISECOND, 0)
+
+            val diffMillis = today.timeInMillis - target.timeInMillis
+            val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()
+
+            when (diffDays) {
+                0 -> "Today"
+                1 -> "Yesterday"
+                else -> SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).format(startDate.time)
+            }
+        } else {
+            val sdf = SimpleDateFormat("MMM d", Locale.ENGLISH)
+            "${sdf.format(startDate.time)} - ${sdf.format(endDate.time)}"
+        }
     }
 
     val gridState = rememberLazyGridState()
@@ -62,8 +101,8 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
 
-    val startOfDay = remember(selectedDate) {
-        val cal = selectedDate.clone() as Calendar
+    val startTimeMillis = remember(startDate) {
+        val cal = startDate.clone() as Calendar
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
@@ -71,7 +110,16 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
         cal.timeInMillis
     }
 
-    val allMediaForDay by locationDao.getMediaInRange(startOfDay, startOfDay + 86400000)
+    val endTimeMillis = remember(endDate) {
+        val cal = endDate.clone() as Calendar
+        cal.set(Calendar.HOUR_OF_DAY, 23)
+        cal.set(Calendar.MINUTE, 59)
+        cal.set(Calendar.SECOND, 59)
+        cal.set(Calendar.MILLISECOND, 999)
+        cal.timeInMillis
+    }
+
+    val allMediaForPeriod by locationDao.getMediaInRange(startTimeMillis, endTimeMillis)
         .collectAsState(initial = emptyList())
 
     // Filter State
@@ -80,37 +128,14 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
     var onlyLiked by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf("Newest to oldest") }
 
-    val filteredMedia = remember(allMediaForDay, showPhotos, showVideos, onlyLiked, sortOrder) {
-        allMediaForDay.filter {
+    val filteredMedia = remember(allMediaForPeriod, showPhotos, showVideos, onlyLiked, sortOrder) {
+        allMediaForPeriod.filter {
             val typeMatch = (it.type == MediaType.IMAGE && showPhotos) || (it.type == MediaType.VIDEO && showVideos)
             val likeMatch = !onlyLiked || it.isLiked
             typeMatch && likeMatch
         }.sortedWith { a, b ->
             if (sortOrder == "Newest to oldest") b.timestamp.compareTo(a.timestamp)
             else a.timestamp.compareTo(b.timestamp)
-        }
-    }
-
-    val relativeDay = remember(selectedDate) {
-        val today = Calendar.getInstance()
-        today.set(Calendar.HOUR_OF_DAY, 0)
-        today.set(Calendar.MINUTE, 0)
-        today.set(Calendar.SECOND, 0)
-        today.set(Calendar.MILLISECOND, 0)
-
-        val target = selectedDate.clone() as Calendar
-        target.set(Calendar.HOUR_OF_DAY, 0)
-        target.set(Calendar.MINUTE, 0)
-        target.set(Calendar.SECOND, 0)
-        target.set(Calendar.MILLISECOND, 0)
-
-        val diffMillis = today.timeInMillis - target.timeInMillis
-        val diffDays = (diffMillis / (24 * 60 * 60 * 1000)).toInt()
-
-        when (diffDays) {
-            0 -> "Today"
-            1 -> "Yesterday"
-            else -> "$diffDays days ago"
         }
     }
 
@@ -129,14 +154,16 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = {
-                            val newCal = selectedDate.clone() as Calendar
-                            newCal.add(Calendar.DAY_OF_YEAR, -1)
-                            selectedDate = newCal
+                            val newStart = startDate.clone() as Calendar
+                            newStart.add(Calendar.DAY_OF_YEAR, -1)
+                            val newEnd = endDate.clone() as Calendar
+                            newEnd.add(Calendar.DAY_OF_YEAR, -1)
+                            onPeriodChange(newStart, newEnd)
                         }) {
                             Icon(Icons.Default.ChevronLeft, contentDescription = "Prev", tint = Color.White)
                         }
                         Text(
-                            text = relativeDay,
+                            text = displayString,
                             color = Color.White,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -145,9 +172,11 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
                         IconButton(
                             onClick = {
                                 if (!isToday) {
-                                    val newCal = selectedDate.clone() as Calendar
-                                    newCal.add(Calendar.DAY_OF_YEAR, 1)
-                                    selectedDate = newCal
+                                    val newStart = startDate.clone() as Calendar
+                                    newStart.add(Calendar.DAY_OF_YEAR, 1)
+                                    val newEnd = endDate.clone() as Calendar
+                                    newEnd.add(Calendar.DAY_OF_YEAR, 1)
+                                    onPeriodChange(newStart, newEnd)
                                 }
                             },
                             enabled = !isToday
@@ -159,9 +188,13 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
                             )
                         }
                     }
-                    Text(dateString, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    if (isSingleDay) {
+                        Text(SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).format(startDate.time), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    } else {
+                        Text(SimpleDateFormat("yyyy", Locale.ENGLISH).format(startDate.time), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    }
                 }
-                IconButton(onClick = { /* Calendar */ }) {
+                IconButton(onClick = { showCalendar = true }) {
                     Icon(Icons.Outlined.CalendarMonth, contentDescription = "Calendar", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             }
@@ -197,6 +230,33 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
                 }
             }
 
+            // Selection Info Bar - Shown when not "today"
+            if (!isToday) {
+                SelectionInfoBar(
+                    startDate = startDate,
+                    endDate = endDate,
+                    onClear = {
+                        val now = Calendar.getInstance()
+                        val start = now.clone() as Calendar
+                        start.set(Calendar.HOUR_OF_DAY, 0)
+                        start.set(Calendar.MINUTE, 0)
+                        start.set(Calendar.SECOND, 0)
+                        start.set(Calendar.MILLISECOND, 0)
+                        
+                        val end = now.clone() as Calendar
+                        end.set(Calendar.HOUR_OF_DAY, 23)
+                        end.set(Calendar.MINUTE, 59)
+                        end.set(Calendar.SECOND, 59)
+                        end.set(Calendar.MILLISECOND, 999)
+                        
+                        onPeriodChange(start, end)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 80.dp)
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -224,6 +284,34 @@ fun MemoriesScreen(onMenuClick: () -> Unit) {
                     onSortOrderChange = { sortOrder = it },
                     onClose = { showSortMenu = false }
                 )
+            }
+
+            if (showCalendar) {
+                Dialog(
+                    onDismissRequest = { showCalendar = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .clickable { showCalendar = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CalendarWindow(
+                            initialStartDate = startDate,
+                            initialEndDate = endDate,
+                            modifier = Modifier
+                                .padding(24.dp)
+                                .clickable(enabled = false) { },
+                            onClose = { showCalendar = false },
+                            onPeriodSelected = { start, end ->
+                                onPeriodChange(start, end)
+                                showCalendar = false
+                            }
+                        )
+                    }
+                }
             }
         }
     }

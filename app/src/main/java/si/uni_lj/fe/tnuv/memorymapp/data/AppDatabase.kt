@@ -23,6 +23,9 @@ abstract class AppDatabase : RoomDatabase() {
                     "location_database"
                 )
                     .fallbackToDestructiveMigration(true)
+                    // Explicitly setting journal mode to WRITE_AHEAD_LOGGING can sometimes 
+                    // avoid SELinux ioctl denials related to file pinning on some devices.
+                    .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                 INSTANCE = instance
                 instance

@@ -35,6 +35,12 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import java.util.Calendar
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
+import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,6 +65,49 @@ fun MemoryMappApp() {
     val scope = rememberCoroutineScope()
     
     var isTracking by remember { mutableStateOf(LocationService.isRunning) }
+    
+    // Media Scanner instance
+    val mediaScanner = remember { MediaScanner(context) }
+
+    // Content Observer to sync with gallery real-time (Deletions/Additions)
+    DisposableEffect(Unit) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                scope.launch {
+                    mediaScanner.scanGallery()
+                }
+            }
+        }
+        
+        context.contentResolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            true,
+            observer
+        )
+        context.contentResolver.registerContentObserver(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            true,
+            observer
+        )
+        
+        onDispose {
+            context.contentResolver.unregisterContentObserver(observer)
+        }
+    }
+
+    // Shared period state
+    var sharedStartDate by remember { mutableStateOf(Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }) }
+    var sharedEndDate by remember { mutableStateOf(Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 23)
+        set(Calendar.MINUTE, 59)
+        set(Calendar.SECOND, 59)
+        set(Calendar.MILLISECOND, 999)
+    }) }
 
     // Handle Notification Permission for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -70,6 +119,10 @@ fun MemoryMappApp() {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+        }
+        // Initial scan on startup
+        scope.launch {
+            mediaScanner.scanGallery()
         }
     }
 
@@ -171,11 +224,25 @@ fun MemoryMappApp() {
                     ActivityScreen(
                         onMenuClick = { scope.launch { drawerState.open() } },
                         isTracking = isTracking,
-                        onToggleTracking = { isTracking = it }
+                        onToggleTracking = { isTracking = it },
+                        startDate = sharedStartDate,
+                        endDate = sharedEndDate,
+                        onPeriodChange = { start, end ->
+                            sharedStartDate = start
+                            sharedEndDate = end
+                        }
                     )
                 }
                 composable("memories") {
-                    MemoriesScreen(onMenuClick = { scope.launch { drawerState.open() } })
+                    MemoriesScreen(
+                        onMenuClick = { scope.launch { drawerState.open() } },
+                        startDate = sharedStartDate,
+                        endDate = sharedEndDate,
+                        onPeriodChange = { start, end ->
+                            sharedStartDate = start
+                            sharedEndDate = end
+                        }
+                    )
                 }
                 composable("trips") {
                     TripsScreen(onMenuClick = { scope.launch { drawerState.open() } })
