@@ -387,17 +387,6 @@ fun TripEditorPanel(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (trip != null) {
-                        Button(
-                            onClick = onDelete,
-                            modifier = Modifier.weight(1f).height(48.dp),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
-                        ) {
-                            Text("Delete trip", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
                     Button(
                         onClick = { onSave(title, description, startDate.value, endDate.value) },
                         enabled = title.isNotBlank(),
@@ -413,6 +402,17 @@ fun TripEditorPanel(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(if (trip == null) "Add trip" else "Save trip", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (trip != null) {
+                        Button(
+                            onClick = onDelete,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
+                        ) {
+                            Text("Delete trip", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

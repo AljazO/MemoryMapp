@@ -32,6 +32,7 @@ import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
@@ -67,6 +68,7 @@ fun MemoriesScreen(
 
     var showSortMenu by remember { mutableStateOf(false) }
     var showCalendar by remember { mutableStateOf(false) }
+    var selectedMedia by remember { mutableStateOf<MediaPoint?>(null) }
 
     val displayString = remember(startDate, endDate, isSingleDay) {
         if (isSingleDay) {
@@ -225,6 +227,9 @@ fun MemoriesScreen(
                                 scope.launch {
                                     locationDao.updateMediaLikeStatus(item.id, !item.isLiked)
                                 }
+                            },
+                            onClick = {
+                                selectedMedia = item
                             }
                         )
                     }
@@ -288,17 +293,25 @@ fun MemoriesScreen(
                     }
                 }
             }
+
+            selectedMedia?.let { media ->
+                MediaPreviewDialog(
+                    mediaPoint = media,
+                    onDismissRequest = { selectedMedia = null }
+                )
+            }
         }
     }
 }
 
 @Composable
-fun MediaItemView(item: MediaPoint, onLikeToggle: () -> Unit) {
+fun MediaItemView(item: MediaPoint, onLikeToggle: () -> Unit, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .aspectRatio(0.8f)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.DarkGray)
+            .clickable { onClick() }
     ) {
         Image(
             painter = rememberAsyncImagePainter(item.uri),

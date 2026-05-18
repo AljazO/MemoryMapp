@@ -14,12 +14,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
+import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
+import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import coil.compose.rememberAsyncImagePainter
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
@@ -329,7 +331,7 @@ fun TripDetailScreen(
                 }
             }
 
-            // View Pictures Button
+            // View Media Button
             Button(
                 onClick = { onViewPicturesClick(tripId) },
                 modifier = Modifier
@@ -338,52 +340,29 @@ fun TripDetailScreen(
                     .fillMaxWidth()
                     .height(56.dp),
                 shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E6EF7))
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                contentPadding = PaddingValues()
             ) {
-                Icon(Icons.Default.Image, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("View Pictures", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.horizontalGradient(listOf(GradientStart, GradientEnd))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Image, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("View Media", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
 
             // Media Preview Popup
-            if (selectedMediaPoint != null) {
-                Dialog(
-                    onDismissRequest = { selectedMediaPoint = null },
-                    properties = DialogProperties(usePlatformDefaultWidth = false)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.8f))
-                            .clickable { selectedMediaPoint = null },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Card(
-                            modifier = Modifier
-                                .padding(24.dp)
-                                .fillMaxWidth()
-                                .aspectRatio(1f)
-                                .clickable(enabled = false) { },
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.Black)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                Image(
-                                    painter = rememberAsyncImagePainter(selectedMediaPoint!!.uri),
-                                    contentDescription = "Media Preview",
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                
-                                IconButton(
-                                    onClick = { selectedMediaPoint = null },
-                                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-                                ) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                                }
-                            }
-                        }
-                    }
-                }
+            selectedMediaPoint?.let { media ->
+                MediaPreviewDialog(
+                    mediaPoint = media,
+                    onDismissRequest = { selectedMediaPoint = null }
+                )
             }
         }
     }

@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
+import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 
@@ -46,6 +48,7 @@ fun TripMemoriesScreen(
     val filteredMedia by locationDao.getMediaInRange(trip.startTime, trip.endTime)
         .collectAsState(initial = emptyList())
 
+    var selectedMedia by remember { mutableStateOf<MediaPoint?>(null) }
     val gridState = rememberLazyGridState()
 
     Scaffold(
@@ -100,10 +103,20 @@ fun TripMemoriesScreen(
                                 scope.launch {
                                     locationDao.updateMediaLikeStatus(item.id, !item.isLiked)
                                 }
+                            },
+                            onClick = {
+                                selectedMedia = item
                             }
                         )
                     }
                 }
+            }
+
+            selectedMedia?.let { media ->
+                MediaPreviewDialog(
+                    mediaPoint = media,
+                    onDismissRequest = { selectedMedia = null }
+                )
             }
         }
     }
