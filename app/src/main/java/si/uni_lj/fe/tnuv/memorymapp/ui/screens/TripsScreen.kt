@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -201,7 +202,8 @@ fun TripsScreen(
 
 @Composable
 fun TripItem(trip: Trip, onClick: () -> Unit, onEdit: () -> Unit) {
-    val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+    val locale = LocalConfiguration.current.locales[0]
+    val sdf = remember(locale) { SimpleDateFormat("dd.MM.yyyy", locale) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -247,7 +249,8 @@ fun TripEditorPanel(
     initialStartDate: Calendar? = null,
     initialEndDate: Calendar? = null
 ) {
-    val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+    val locale = LocalConfiguration.current.locales[0]
+    val sdf = remember(locale) { SimpleDateFormat("dd.MM.yyyy", locale) }
     
     var title by remember { mutableStateOf(trip?.title ?: "") }
     var description by remember { mutableStateOf(trip?.description ?: "") }
