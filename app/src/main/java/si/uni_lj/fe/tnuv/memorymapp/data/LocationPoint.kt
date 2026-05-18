@@ -9,5 +9,7 @@ data class LocationPoint(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val latitude: Double,
     val longitude: Double,
-    val timestamp: Long
+    val timestamp: Long,
+    val altitude: Double = 0.0,
+    val totalStepsAtTimestamp: Int = 0
 )

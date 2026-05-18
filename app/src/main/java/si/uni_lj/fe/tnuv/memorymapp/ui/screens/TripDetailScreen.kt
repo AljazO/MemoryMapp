@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.StatisticsWindow
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import coil.compose.rememberAsyncImagePainter
@@ -66,6 +68,7 @@ fun TripDetailScreen(
     var sliderValue by remember { mutableFloatStateOf(1f) }
     var isUserInteracting by remember { mutableStateOf(false) }
     var selectedMediaPoint by remember { mutableStateOf<MediaPoint?>(null) }
+    var showStatistics by remember { mutableStateOf(false) }
 
     val totalDurationMillis = trip.endTime - trip.startTime
     val currentTimestamp = trip.startTime + (sliderValue * totalDurationMillis).toLong()
@@ -247,7 +250,7 @@ fun TripDetailScreen(
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 100.dp)
+                    .padding(horizontal = 16.dp, vertical = 120.dp)
                     .fillMaxWidth()
                     .height(96.dp),
                 shape = RoundedCornerShape(20.dp),
@@ -336,7 +339,7 @@ fun TripDetailScreen(
                 onClick = { onViewPicturesClick(tripId) },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(24.dp)
+                    .padding(bottom = 56.dp, start = 24.dp, end = 24.dp)
                     .fillMaxWidth()
                     .height(56.dp),
                 shape = RoundedCornerShape(28.dp),
@@ -354,6 +357,58 @@ fun TripDetailScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("View Media", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+
+            // Advanced Statistics Button
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.clickable { showStatistics = true }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Advanced statistics",
+                            color = Color.White,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            // Statistics Overlay
+            if (showStatistics) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f))
+                        .clickable { showStatistics = false }
+                ) {
+                    StatisticsWindow(
+                        points = pathPoints,
+                        startTime = trip.startTime,
+                        endTime = trip.endTime,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 0.dp, start = 16.dp, end = 16.dp)
+                            .clickable(enabled = false) { },
+                        onClose = { showStatistics = false }
+                    )
                 }
             }
 

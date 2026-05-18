@@ -73,7 +73,9 @@ import android.content.Context
 import androidx.compose.ui.graphics.asImageBitmap
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.StatisticsWindow
 import si.uni_lj.fe.tnuv.memorymapp.utils.MapUtils
+import si.uni_lj.fe.tnuv.memorymapp.utils.StatisticsCalculator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -157,6 +159,16 @@ fun ActivityScreen(
         )
     }
 
+    var hasActivityPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+        )
+    }
+
     val combinedPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -170,8 +182,15 @@ fun ActivityScreen(
         val locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         
+        val activityGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permissions[Manifest.permission.ACTIVITY_RECOGNITION] == true
+        } else {
+            true
+        }
+        
         hasMediaPermission = mediaGranted
         hasLocationPermission = locationGranted
+        hasActivityPermission = activityGranted
     }
 
     LaunchedEffect(Unit) {
@@ -196,6 +215,13 @@ fun ActivityScreen(
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             perms.add(Manifest.permission.ACCESS_FINE_LOCATION)
             perms.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+
+        // Activity recognition permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                perms.add(Manifest.permission.ACTIVITY_RECOGNITION)
+            }
         }
 
         if (perms.isNotEmpty()) {
@@ -912,7 +938,11 @@ fun ActivityScreen(
                         .background(Color.Black.copy(alpha = 0.3f))
                         .clickable { showStatistics = false }
                 ) {
+                    val statsEndTime = if (isToday) System.currentTimeMillis() else endTimeMillis
                     StatisticsWindow(
+                        points = allPointsForPeriod,
+                        startTime = startTimeMillis,
+                        endTime = statsEndTime,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 0.dp, start = 16.dp, end = 16.dp)
@@ -950,55 +980,6 @@ fun ActivityScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun StatisticsWindow(modifier: Modifier = Modifier, onClose: () -> Unit) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1115))
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                }
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem(label = "Distance", value = "0,00 km", icon = null)
-                StatItem(label = "Duration", value = "00:00:00", icon = null)
-                StatItem(label = "Calories", value = "0 kcal", icon = null)
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem(label = "Steps", value = "0", icon = Icons.AutoMirrored.Filled.DirectionsRun)
-                StatItem(label = "Avg Pace", value = "0.00 km/h", icon = Icons.Default.Timer, iconTint = Color(0xFF007AFF))
-                StatItem(label = "Elevation", value = "0 m", icon = Icons.AutoMirrored.Filled.TrendingUp, iconTint = Color(0xFF81D4FA))
-            }
-        }
-    }
-}
-
-@Composable
-fun StatItem(label: String, value: String, icon: ImageVector?, iconTint: Color = Color(0xFF6E6EF7)) {
-    Column(
-        modifier = Modifier.width(90.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text(text = label, color = Color.Gray, fontSize = 10.sp, textAlign = TextAlign.Center)
-        if (icon != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(24.dp))
         }
     }
 }

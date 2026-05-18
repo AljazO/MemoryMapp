@@ -1,5 +1,6 @@
 package si.uni_lj.fe.tnuv.memorymapp.service
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,29 +8,55 @@ import android.app.Service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import si.uni_lj.fe.tnuv.memorymapp.MainActivity
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 
-class LocationService : Service() {
+class LocationService : Service(), SensorEventListener {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastSavedLocation: Location? = null
+    
+    private var sensorManager: SensorManager? = null
+    private var stepCounterSensor: Sensor? = null
+    private var currentTotalSteps: Int = 0
+    private var lastSavedStepCount: Int = 0
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        stepCounterSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        
+        val hasActivityRecognition = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
+        if (hasActivityRecognition) {
+            stepCounterSensor?.let {
+                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+        }
         
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
@@ -40,7 +67,28 @@ class LocationService : Service() {
                 }
             }
         }
+        
+        startStationaryStepTracking()
     }
+
+    private fun startStationaryStepTracking() {
+        serviceScope.launch {
+            while (isRunning) {
+                delay(60000)
+                if (currentTotalSteps > lastSavedStepCount) {
+                    lastSavedLocation?.let { saveLocation(it) }
+                }
+            }
+        }
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event?.sensor?.type == Sensor.TYPE_STEP_COUNTER) {
+            currentTotalSteps = event.values[0].toInt()
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun isValidLocation(location: Location): Boolean {
         // 1. Accuracy check: ignore points with low accuracy (relaxed slightly)
@@ -64,13 +112,16 @@ class LocationService : Service() {
 
     private fun saveLocation(location: Location) {
         lastSavedLocation = location
+        lastSavedStepCount = currentTotalSteps
         serviceScope.launch {
             val db = AppDatabase.getDatabase(applicationContext)
             db.locationDao().insert(
                 LocationPoint(
                     latitude = location.latitude,
                     longitude = location.longitude,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = System.currentTimeMillis(),
+                    altitude = if (location.hasAltitude()) location.altitude else 0.0,
+                    totalStepsAtTimestamp = currentTotalSteps
                 )
             )
         }
@@ -88,7 +139,7 @@ class LocationService : Service() {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Memory Mapp")
-            .setContentText("Tracking your location in the background")
+            .setContentText("Tracking your location and stats in the background")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -117,6 +168,7 @@ class LocationService : Service() {
         super.onDestroy()
         isRunning = false
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        sensorManager?.unregisterListener(this)
         serviceScope.cancel()
     }
 
