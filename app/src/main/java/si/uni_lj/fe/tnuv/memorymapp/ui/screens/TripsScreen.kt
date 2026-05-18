@@ -27,6 +27,9 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,7 +40,12 @@ fun TripsScreen(
     initialEndDate: Calendar? = null,
     showAddInitially: Boolean = false
 ) {
-    var showAddTrip by remember { mutableStateOf(showAddInitially) }
+    var showEditor by remember { mutableStateOf(showAddInitially) }
+    var editingTrip by remember { mutableStateOf<Trip?>(null) }
+    var showCalendarByFab by remember { mutableStateOf(false) }
+    var pendingStartDate by remember { mutableStateOf<Calendar?>(initialStartDate) }
+    var pendingEndDate by remember { mutableStateOf<Calendar?>(initialEndDate) }
+    
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     val database = remember { AppDatabase.getDatabase(context) }
@@ -77,7 +85,14 @@ fun TripsScreen(
                         .verticalScroll(scrollState)
                 ) {
                     trips.forEach { trip ->
-                        TripItem(trip = trip, onClick = { onTripClick(trip.id) })
+                        TripItem(
+                            trip = trip,
+                            onClick = { onTripClick(trip.id) },
+                            onEdit = {
+                                editingTrip = trip
+                                showEditor = true
+                            }
+                        )
                     }
                     Spacer(modifier = Modifier.height(80.dp))
                 }
@@ -93,30 +108,91 @@ fun TripsScreen(
                         brush = Brush.horizontalGradient(listOf(GradientStart, GradientEnd)),
                         shape = CircleShape
                     )
-                    .clickable { showAddTrip = true },
+                    .clickable { showCalendarByFab = true },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Trip", tint = Color.White, modifier = Modifier.size(32.dp))
             }
 
-            if (showAddTrip) {
-                AddTripPanel(
-                    onClose = { showAddTrip = false },
-                    onAddTrip = { title, description, start, end ->
+            if (showCalendarByFab) {
+                val today = Calendar.getInstance()
+                Dialog(
+                    onDismissRequest = { showCalendarByFab = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .clickable { showCalendarByFab = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CalendarWindow(
+                            initialStartDate = today,
+                            initialEndDate = today,
+                            modifier = Modifier
+                                .padding(24.dp)
+                                .clickable(enabled = false) { },
+                            onClose = { showCalendarByFab = false },
+                            onPeriodSelected = { start, end ->
+                                pendingStartDate = start
+                                pendingEndDate = end
+                                editingTrip = null
+                                showCalendarByFab = false
+                                showEditor = true
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (showEditor) {
+                TripEditorPanel(
+                    trip = editingTrip,
+                    onClose = { 
+                        showEditor = false
+                        editingTrip = null
+                    },
+                    onSave = { title, description, start, end ->
                         scope.launch {
-                            locationDao.insertTrip(
-                                Trip(
-                                    title = title,
-                                    description = description,
-                                    startTime = start.timeInMillis,
-                                    endTime = end.timeInMillis
+                            if (editingTrip != null) {
+                                locationDao.updateTrip(
+                                    editingTrip!!.copy(
+                                        title = title,
+                                        description = description,
+                                        startTime = start.timeInMillis,
+                                        endTime = end.timeInMillis
+                                    )
                                 )
-                            )
-                            showAddTrip = false
+                            } else {
+                                locationDao.insertTrip(
+                                    Trip(
+                                        title = title,
+                                        description = description,
+                                        startTime = start.timeInMillis,
+                                        endTime = end.timeInMillis
+                                    )
+                                )
+                            }
+                            showEditor = false
+                            editingTrip = null
                         }
                     },
-                    initialStartDate = initialStartDate,
-                    initialEndDate = initialEndDate
+                    onDelete = {
+                        editingTrip?.let {
+                            scope.launch {
+                                locationDao.deleteTrip(it)
+                                showEditor = false
+                                editingTrip = null
+                            }
+                        }
+                    },
+                    initialStartDate = if (editingTrip != null) {
+                        Calendar.getInstance().apply { timeInMillis = editingTrip!!.startTime }
+                    } else pendingStartDate,
+                    initialEndDate = if (editingTrip != null) {
+                        Calendar.getInstance().apply { timeInMillis = editingTrip!!.endTime }
+                    } else pendingEndDate
                 )
             }
         }
@@ -124,7 +200,7 @@ fun TripsScreen(
 }
 
 @Composable
-fun TripItem(trip: Trip, onClick: () -> Unit) {
+fun TripItem(trip: Trip, onClick: () -> Unit, onEdit: () -> Unit) {
     val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
     Card(
         modifier = Modifier
@@ -155,24 +231,37 @@ fun TripItem(trip: Trip, onClick: () -> Unit) {
                     fontSize = 12.sp
                 )
             }
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.White)
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Edit Trip", tint = Color.White)
+            }
         }
     }
 }
 
 @Composable
-fun AddTripPanel(
+fun TripEditorPanel(
+    trip: Trip? = null,
     onClose: () -> Unit,
-    onAddTrip: (String, String, Calendar, Calendar) -> Unit,
+    onSave: (String, String, Calendar, Calendar) -> Unit,
+    onDelete: () -> Unit,
     initialStartDate: Calendar? = null,
     initialEndDate: Calendar? = null
 ) {
     val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
     
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    val startDate = remember { mutableStateOf(initialStartDate ?: Calendar.getInstance()) }
-    val endDate = remember { mutableStateOf(initialEndDate ?: Calendar.getInstance()) }
+    var title by remember { mutableStateOf(trip?.title ?: "") }
+    var description by remember { mutableStateOf(trip?.description ?: "") }
+    val startDate = remember { 
+        mutableStateOf(initialStartDate ?: Calendar.getInstance().apply { 
+            trip?.startTime?.let { timeInMillis = it }
+        }) 
+    }
+    val endDate = remember { 
+        mutableStateOf(initialEndDate ?: Calendar.getInstance().apply { 
+            trip?.endTime?.let { timeInMillis = it }
+        }) 
+    }
+    var showCalendarInPanel by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -191,7 +280,7 @@ fun AddTripPanel(
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Add your trip", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(if (trip == null) "Add your trip" else "Edit your trip", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onClose, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                     }
@@ -239,7 +328,12 @@ fun AddTripPanel(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Start Date", color = Color.White, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)) {
+                        Box(modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp))
+                            .clickable { showCalendarInPanel = true }
+                            .padding(12.dp)
+                        ) {
                             Text(sdf.format(startDate.value.time), color = Color.White, fontSize = 12.sp)
                         }
                     }
@@ -247,29 +341,76 @@ fun AddTripPanel(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("End Date", color = Color.White, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp)).padding(12.dp)) {
+                        Box(modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp))
+                            .clickable { showCalendarInPanel = true }
+                            .padding(12.dp)
+                        ) {
                             Text(sdf.format(endDate.value.time), color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                if (showCalendarInPanel) {
+                    Dialog(
+                        onDismissRequest = { showCalendarInPanel = false },
+                        properties = DialogProperties(usePlatformDefaultWidth = false)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.5f))
+                                .clickable { showCalendarInPanel = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CalendarWindow(
+                                initialStartDate = startDate.value,
+                                initialEndDate = endDate.value,
+                                modifier = Modifier
+                                    .padding(24.dp)
+                                    .clickable(enabled = false) { },
+                                onClose = { showCalendarInPanel = false },
+                                onPeriodSelected = { start, end ->
+                                    startDate.value = start
+                                    endDate.value = end
+                                    showCalendarInPanel = false
+                                }
+                            )
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = { onAddTrip(title, description, startDate.value, endDate.value) },
-                    enabled = title.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    contentPadding = PaddingValues()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Brush.horizontalGradient(listOf(GradientStart, GradientEnd))),
-                        contentAlignment = Alignment.Center
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (trip != null) {
+                        Button(
+                            onClick = onDelete,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
+                        ) {
+                            Text("Delete trip", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Button(
+                        onClick = { onSave(title, description, startDate.value, endDate.value) },
+                        enabled = title.isNotBlank(),
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = PaddingValues()
                     ) {
-                        Text("Add trip", color = Color.White, fontWeight = FontWeight.Bold)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Brush.horizontalGradient(listOf(GradientStart, GradientEnd))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(if (trip == null) "Add trip" else "Save trip", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

@@ -16,59 +16,39 @@ import java.util.*
 
 @Composable
 fun SelectionInfoBar(
-    startDate: Calendar,
-    endDate: Calendar,
     onClear: () -> Unit,
     onAddTrip: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isSingleDay = remember(startDate, endDate) {
-        startDate.get(Calendar.YEAR) == endDate.get(Calendar.YEAR) &&
-                startDate.get(Calendar.DAY_OF_YEAR) == endDate.get(Calendar.DAY_OF_YEAR)
-    }
-    
-    val sdf = SimpleDateFormat("MMM d, yyyy", Locale.ENGLISH)
-    val periodText = if (isSingleDay) {
-        sdf.format(startDate.time)
-    } else {
-        "${sdf.format(startDate.time)} - ${sdf.format(endDate.time)}"
-    }
-
     Surface(
         color = Color.Black.copy(alpha = 0.8f),
         shape = RoundedCornerShape(20.dp),
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column {
-                Text("Selected period:", color = Color.Gray, fontSize = 10.sp)
-                Text(periodText, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Button(
+                onClick = onAddTrip,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E6EF7)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("Add trip", color = Color.White, fontSize = 12.sp)
             }
-            Spacer(modifier = Modifier.width(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onAddTrip,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6E6EF7)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text("Add trip", color = Color.White, fontSize = 12.sp)
-                }
-                
-                OutlinedButton(
-                    onClick = onClear,
-                    border = null,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text("Clear", fontSize = 12.sp)
-                }
+            
+            OutlinedButton(
+                onClick = onClear,
+                border = null,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("Clear", fontSize = 12.sp)
             }
         }
     }

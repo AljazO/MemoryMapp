@@ -1,5 +1,6 @@
 package si.uni_lj.fe.tnuv.memorymapp.ui.screens
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -60,7 +61,7 @@ fun TripDetailScreen(
     val mediaPoints by locationDao.getMediaInRange(trip.startTime, trip.endTime).collectAsState(initial = emptyList())
 
     // Slider State
-    var sliderValue by remember { mutableFloatStateOf(0f) }
+    var sliderValue by remember { mutableFloatStateOf(1f) }
     var isUserInteracting by remember { mutableStateOf(false) }
     var selectedMediaPoint by remember { mutableStateOf<MediaPoint?>(null) }
 
@@ -257,6 +258,23 @@ fun TripDetailScreen(
                     val sdfTime = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
                     val sdfDate = remember { SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()) }
                     
+                    val daysCount = remember(trip) {
+                        val s = Calendar.getInstance().apply { timeInMillis = trip.startTime }
+                        s.set(Calendar.HOUR_OF_DAY, 0)
+                        s.set(Calendar.MINUTE, 0)
+                        s.set(Calendar.SECOND, 0)
+                        s.set(Calendar.MILLISECOND, 0)
+                        
+                        val e = Calendar.getInstance().apply { timeInMillis = trip.endTime }
+                        e.set(Calendar.HOUR_OF_DAY, 0)
+                        e.set(Calendar.MINUTE, 0)
+                        e.set(Calendar.SECOND, 0)
+                        e.set(Calendar.MILLISECOND, 0)
+                        
+                        val diff = e.timeInMillis - s.timeInMillis
+                        (diff / (24 * 60 * 60 * 1000)).toInt() + 1
+                    }
+
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Text(
                             sdfTime.format(Date(currentTimestamp)),
@@ -271,22 +289,35 @@ fun TripDetailScreen(
                         )
                     }
 
-                    Slider(
-                        value = sliderValue,
-                        onValueChange = { 
-                            sliderValue = it
-                            isUserInteracting = false 
-                        },
-                        valueRange = 0f..1f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF6E6EF7),
-                            activeTrackColor = Color(0xFF6E6EF7),
-                            inactiveTrackColor = Color.White.copy(alpha = 0.2f),
-                            activeTickColor = Color.Transparent,
-                            inactiveTickColor = Color.Transparent
-                        ),
-                        modifier = Modifier.height(32.dp)
-                    )
+                    Box(modifier = Modifier.fillMaxWidth().height(32.dp)) {
+                        Slider(
+                            value = sliderValue,
+                            onValueChange = { 
+                                sliderValue = it
+                                isUserInteracting = false 
+                            },
+                            valueRange = 0f..1f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF6E6EF7),
+                                activeTrackColor = Color(0xFF6E6EF7),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                                activeTickColor = Color.Transparent,
+                                inactiveTickColor = Color.Transparent
+                            ),
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        
+                        // White dots for day separators
+                        if (daysCount > 1) {
+                            Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                for (i in 1 until daysCount) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
+                                }
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),

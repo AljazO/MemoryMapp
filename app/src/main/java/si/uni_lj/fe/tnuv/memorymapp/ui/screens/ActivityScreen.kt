@@ -210,51 +210,58 @@ fun ActivityScreen(
     }
 
     // Slider state
+    val daysCountTotal = remember(startDate, endDate) {
+        val s = startDate.clone() as Calendar
+        s.set(Calendar.HOUR_OF_DAY, 0)
+        s.set(Calendar.MINUTE, 0)
+        s.set(Calendar.SECOND, 0)
+        s.set(Calendar.MILLISECOND, 0)
+        
+        val e = endDate.clone() as Calendar
+        e.set(Calendar.HOUR_OF_DAY, 0)
+        e.set(Calendar.MINUTE, 0)
+        e.set(Calendar.SECOND, 0)
+        e.set(Calendar.MILLISECOND, 0)
+        
+        val diff = e.timeInMillis - s.timeInMillis
+        (diff / (24 * 60 * 60 * 1000)).toInt() + 1
+    }
+    val totalMinutesTotal = daysCountTotal * 1440f
+
     val calendarNow = Calendar.getInstance()
+    var currentMinutesOfToday by remember { mutableFloatStateOf((calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()) }
+    
     val initialMinutes = if (isToday) {
-        (calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()
+        ((daysCountTotal - 1) * 1440f) + currentMinutesOfToday
     } else {
-        1440f // End of day for past days
+        totalMinutesTotal - 1f // 23:59 of the last day
     }
     
-    var currentMinutesOfToday by remember { mutableFloatStateOf((calendarNow.get(Calendar.HOUR_OF_DAY) * 60 + calendarNow.get(Calendar.MINUTE)).toFloat()) }
     var sliderValue by remember { mutableFloatStateOf(initialMinutes) }
 
     // Reset slider when date changes
     LaunchedEffect(startDate, endDate) {
         if (isToday) {
-            sliderValue = currentMinutesOfToday
+            sliderValue = ((daysCountTotal - 1) * 1440f) + currentMinutesOfToday
         } else {
-            sliderValue = 1440f
+            sliderValue = totalMinutesTotal - 1f
         }
     }
 
     // Filter points based on slider
-    val pastPathPoints = remember(allPointsForPeriod, sliderValue, isSingleDay) {
-        if (isSingleDay) {
-            val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
-            allPointsForPeriod.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
-        } else {
-            allPointsForPeriod.map { LatLng(it.latitude, it.longitude) }
-        }
+    val pastPathPoints = remember(allPointsForPeriod, sliderValue) {
+        val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
+        allPointsForPeriod.filter { it.timestamp <= maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
     }
 
-    val filteredMediaPoints = remember(mediaPointsForPeriod, sliderValue, isSingleDay) {
-        if (isSingleDay) {
-            val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
-            mediaPointsForPeriod.filter { it.timestamp <= maxTimestamp }
-        } else {
-            mediaPointsForPeriod
-        }
+    val filteredMediaPoints = remember(mediaPointsForPeriod, sliderValue) {
+        val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
+        mediaPointsForPeriod.filter { it.timestamp <= maxTimestamp }
     }
 
-    val futurePathPoints = remember(allPointsForPeriod, sliderValue, isSingleDay) {
-        if (isSingleDay) {
-            val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
-            allPointsForPeriod.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
-        } else {
-            emptyList()
-        }
+    val futurePathPoints = remember(allPointsForPeriod, sliderValue) {
+        val maxTimestamp = startTimeMillis + (sliderValue * 60 * 1000).toLong()
+        allPointsForPeriod.filter { it.timestamp > maxTimestamp }.map { LatLng(it.latitude, it.longitude) }
     }
 
     val historyIndicatorPosition = remember(pastPathPoints) {
@@ -442,7 +449,7 @@ fun ActivityScreen(
                         }
 
                         // History Indicator (Red Dot)
-                        if (historyIndicatorPosition != null && isSingleDay) {
+                        if (historyIndicatorPosition != null) {
                             val historyIcon = remember {
                                 BitmapDescriptorFactory.fromBitmap(MapUtils.createHistoryDotBitmap(context))
                             }
@@ -472,7 +479,33 @@ fun ActivityScreen(
                         }
                     }
 
-                    // Custom Zoom and Recenter Controls
+            // Selection Info Bar - Shown when not "today"
+            if (!isToday) {
+                SelectionInfoBar(
+                    onClear = {
+                        val now = Calendar.getInstance()
+                        val start = now.clone() as Calendar
+                        start.set(Calendar.HOUR_OF_DAY, 0)
+                        start.set(Calendar.MINUTE, 0)
+                        start.set(Calendar.SECOND, 0)
+                        start.set(Calendar.MILLISECOND, 0)
+                        
+                        val end = now.clone() as Calendar
+                        end.set(Calendar.HOUR_OF_DAY, 23)
+                        end.set(Calendar.MINUTE, 59)
+                        end.set(Calendar.SECOND, 59)
+                        end.set(Calendar.MILLISECOND, 999)
+                        
+                        onPeriodChange(start, end)
+                    },
+                    onAddTrip = onAddTrip,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp)
+                )
+            }
+
+            // Custom Zoom and Recenter Controls
                     Column(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -545,37 +578,26 @@ fun ActivityScreen(
                 }
             }
 
-            // Selection Info Bar - Shown when not "today"
-            if (!isToday) {
-                SelectionInfoBar(
-                    startDate = startDate,
-                    endDate = endDate,
-                    onClear = {
-                        val now = Calendar.getInstance()
-                        val start = now.clone() as Calendar
-                        start.set(Calendar.HOUR_OF_DAY, 0)
-                        start.set(Calendar.MINUTE, 0)
-                        start.set(Calendar.SECOND, 0)
-                        start.set(Calendar.MILLISECOND, 0)
-                        
-                        val end = now.clone() as Calendar
-                        end.set(Calendar.HOUR_OF_DAY, 23)
-                        end.set(Calendar.MINUTE, 59)
-                        end.set(Calendar.SECOND, 59)
-                        end.set(Calendar.MILLISECOND, 999)
-                        
-                        onPeriodChange(start, end)
-                    },
-                    onAddTrip = onAddTrip,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 60.dp)
-                )
-            }
-
-            // Time slider bar - Only show for single day
-            if (isSingleDay) {
-                val sliderPadding = if (!isToday) 110.dp else 60.dp
+            // Time slider bar
+            if (true) { // Show slider always now, or keep some logic
+                val daysCount = remember(startDate, endDate) {
+                    val s = startDate.clone() as Calendar
+                    s.set(Calendar.HOUR_OF_DAY, 0)
+                    s.set(Calendar.MINUTE, 0)
+                    s.set(Calendar.SECOND, 0)
+                    s.set(Calendar.MILLISECOND, 0)
+                    
+                    val e = endDate.clone() as Calendar
+                    e.set(Calendar.HOUR_OF_DAY, 0)
+                    e.set(Calendar.MINUTE, 0)
+                    e.set(Calendar.SECOND, 0)
+                    e.set(Calendar.MILLISECOND, 0)
+                    
+                    val diff = e.timeInMillis - s.timeInMillis
+                    (diff / (24 * 60 * 60 * 1000)).toInt() + 1
+                }
+                
+                val sliderPadding = 60.dp
                 Card(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -589,9 +611,21 @@ fun ActivityScreen(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalArrangement = Arrangement.Center
                     ) {
-                        val hours = (sliderValue / 60).toInt()
-                        val minutes = (sliderValue % 60).toInt()
-                        val timeString = "%02d:%02d".format(hours, minutes)
+                        val currentTotalMinutes = sliderValue.toInt()
+                        val dayIndex = (currentTotalMinutes / 1440).coerceIn(0, daysCountTotal - 1)
+                        val minutesInDay = (currentTotalMinutes % 1440).coerceIn(0, 1439)
+                        val hours = minutesInDay / 60
+                        val minutes = minutesInDay % 60
+                        
+                        val displayCalendar = (startDate.clone() as Calendar).apply {
+                            add(Calendar.DAY_OF_YEAR, dayIndex)
+                        }
+                        val dateString = SimpleDateFormat("MMM d", Locale.ENGLISH).format(displayCalendar.time)
+                        val timeString = if (daysCount > 1) {
+                            "%s, %02d:%02d".format(dateString, hours, minutes)
+                        } else {
+                            "%02d:%02d".format(hours, minutes)
+                        }
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -601,7 +635,7 @@ fun ActivityScreen(
                             Text(
                                 timeString,
                                 color = Color(0xFF6E6EF7),
-                                fontSize = 20.sp,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.clickable {
                                     hourInput = "%02d".format(hours)
@@ -783,30 +817,47 @@ fun ActivityScreen(
                             }
                         }
 
-                        Slider(
-                            value = sliderValue,
-                            onValueChange = { newValue ->
-                                val max = if (isToday) currentMinutesOfToday else 1440f
-                                sliderValue = newValue.coerceAtMost(max)
-                                isUserInteracting = false // Force map to follow history dot during scrolling
-                            },
-                            valueRange = 0f..1440f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFF6E6EF7),
-                                activeTrackColor = Color(0xFF6E6EF7),
-                                inactiveTrackColor = Color.White.copy(alpha = 0.2f),
-                                activeTickColor = Color.Transparent,
-                                inactiveTickColor = Color.Transparent
-                            ),
-                            modifier = Modifier.height(32.dp)
-                        )
+                        Box(modifier = Modifier.fillMaxWidth().height(32.dp)) {
+                            Slider(
+                                value = sliderValue,
+                                onValueChange = { newValue ->
+                                    val maxAllowed = if (isToday) {
+                                        ((daysCountTotal - 1) * 1440f) + currentMinutesOfToday
+                                    } else {
+                                        totalMinutesTotal - 1f
+                                    }
+                                    sliderValue = newValue.coerceIn(0f, maxAllowed)
+                                    isUserInteracting = false // Force map to follow history dot during scrolling
+                                },
+                                valueRange = 0f..(totalMinutesTotal - 1f),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFF6E6EF7),
+                                    activeTrackColor = Color(0xFF6E6EF7),
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                                    activeTickColor = Color.Transparent,
+                                    inactiveTickColor = Color.Transparent
+                                ),
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            
+                            // White dots for day separators
+                            if (daysCount > 1) {
+                                Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    for (i in 1 until daysCount) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
+                                    }
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
 
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("00:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                            Text("24:00", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                            Text("23:59", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                         }
                     }
                 }

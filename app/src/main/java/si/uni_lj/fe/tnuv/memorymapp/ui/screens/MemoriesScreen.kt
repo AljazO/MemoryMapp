@@ -231,34 +231,7 @@ fun MemoriesScreen(
                 }
             }
 
-            // Selection Info Bar - Shown when not "today"
-            if (!isToday) {
-                SelectionInfoBar(
-                    startDate = startDate,
-                    endDate = endDate,
-                    onClear = {
-                        val now = Calendar.getInstance()
-                        val start = now.clone() as Calendar
-                        start.set(Calendar.HOUR_OF_DAY, 0)
-                        start.set(Calendar.MINUTE, 0)
-                        start.set(Calendar.SECOND, 0)
-                        start.set(Calendar.MILLISECOND, 0)
-                        
-                        val end = now.clone() as Calendar
-                        end.set(Calendar.HOUR_OF_DAY, 23)
-                        end.set(Calendar.MINUTE, 59)
-                        end.set(Calendar.SECOND, 59)
-                        end.set(Calendar.MILLISECOND, 999)
-                        
-                        onPeriodChange(start, end)
-                    },
-                    onAddTrip = onAddTrip,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 80.dp)
-                )
-            }
-
+            // Floating Sort/Filter Button
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)

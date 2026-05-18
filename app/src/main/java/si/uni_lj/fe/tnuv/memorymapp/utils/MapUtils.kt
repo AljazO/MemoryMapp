@@ -44,7 +44,7 @@ object MapUtils {
         }
         canvas.drawCircle(center, center, size / 2.1f, paint)
 
-        paint.color = android.graphics.Color.RED
+        paint.color = android.graphics.Color.parseColor("#4A90E2")
         canvas.drawCircle(center, center, size / 2.8f, paint)
 
         return bitmap

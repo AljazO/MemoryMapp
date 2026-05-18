@@ -206,7 +206,13 @@ fun CalendarWindow(
             Button(
                 onClick = {
                     val finalStart = selectedStart ?: initialStartDate
-                    val finalEnd = selectedEnd ?: finalStart
+                    val finalEnd = (selectedEnd ?: finalStart).clone() as Calendar
+                    // Ensure end date is at the very end of the day
+                    finalEnd.set(Calendar.HOUR_OF_DAY, 23)
+                    finalEnd.set(Calendar.MINUTE, 59)
+                    finalEnd.set(Calendar.SECOND, 59)
+                    finalEnd.set(Calendar.MILLISECOND, 999)
+
                     onPeriodSelected(finalStart, finalEnd)
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
