@@ -125,7 +125,7 @@ class LocationService : Service(), SensorEventListener {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Memory Mapp")
-            .setContentText("Recording your journey smoothly...")
+            .setContentText("Recording your journey...")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

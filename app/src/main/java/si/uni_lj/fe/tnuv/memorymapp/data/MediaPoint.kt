@@ -10,7 +10,7 @@ enum class MediaType {
 @Entity(tableName = "media_points", primaryKeys = ["id", "userId"])
 data class MediaPoint(
     val id: String, 
-    val userId: String, //userId is now part of the primary key and non-nullable
+    val userId: String,
     val uri: String,
     val latitude: Double,
     val longitude: Double,

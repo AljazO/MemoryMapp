@@ -6,10 +6,6 @@ import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 
 object TrackSmoother {
 
-    /**
-     * Smoothens a track by deleting points that represent movement below the threshold.
-     * This follows the "save then delete" strategy to keep the path clean.
-     */
     suspend fun smoothTrack(locationDao: LocationDao, userId: String?, startTime: Long, endTime: Long, thresholdMeters: Float = 5f) {
         if (userId == null) return
         val points = locationDao.getPointsInRangeSync(userId, startTime, endTime)
@@ -29,16 +25,12 @@ object TrackSmoother {
             )
 
             if (distance[0] < thresholdMeters) {
-                // Movement is too small, mark for deletion
                 idsToDelete.add(currentPoint.id)
             } else {
-                // Significant movement, keep this point and use it as the new reference
                 lastKeptPoint = currentPoint
             }
         }
 
-        // We usually keep the very last point to ensure the track ends correctly
-        // unless it's identical to the last kept point.
         val lastPoint = points.last()
         val finalDistance = FloatArray(1)
         Location.distanceBetween(

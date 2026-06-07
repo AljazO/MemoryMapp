@@ -15,7 +15,6 @@ class LocationTracker(
     private var locationCallback: LocationCallback? = null
     private var lastSavedLocation: Location? = null
 
-    // Thresholds for smoother tracking
     private val MIN_DISTANCE_METERS = 11.0f
     private val MAX_ACCURACY_METERS = 50.0f
     private val MAX_SPEED_MS = 30.0f

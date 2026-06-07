@@ -17,7 +17,6 @@ class AuthRepository {
             if (firebaseUser == null) {
                 trySend(null)
             } else {
-                // Fetch additional info from Firestore
                 val docRef = firestore.collection("users").document(firebaseUser.uid)
                 val registration = docRef.addSnapshotListener { snapshot, error ->
                     if (error != null) {
@@ -26,7 +25,7 @@ class AuthRepository {
                     val profile = snapshot?.toObject(UserProfile::class.java)
                     trySend(profile)
                 }
-                // Note: registration needs to be closed, but for simplicity in this flow we keep it
+
             }
         }
         auth.addAuthStateListener(authStateListener)
