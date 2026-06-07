@@ -35,6 +35,7 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TripsScreen(
+    userId: String, // Added userId
     onMenuClick: () -> Unit,
     onTripClick: (Long) -> Unit,
     initialStartDate: Calendar? = null,
@@ -51,7 +52,9 @@ fun TripsScreen(
     val context = LocalContext.current
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
-    val trips by locationDao.getAllTrips().collectAsState(initial = emptyList())
+    
+    // Filter trips by userId
+    val trips by locationDao.getAllTrips(userId).collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -163,11 +166,13 @@ fun TripsScreen(
                                         description = description,
                                         startTime = start.timeInMillis,
                                         endTime = end.timeInMillis
+                                        // userId remains the same
                                     )
                                 )
                             } else {
                                 locationDao.insertTrip(
                                     Trip(
+                                        userId = userId, // Assign current userId to new trip
                                         title = title,
                                         description = description,
                                         startTime = start.timeInMillis,

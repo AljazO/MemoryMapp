@@ -40,9 +40,11 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
+import si.uni_lj.fe.tnuv.memorymapp.ui.viewmodels.AuthViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,7 +59,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MemoryMappApp() {
+fun MemoryMappApp(authViewModel: AuthViewModel = viewModel()) {
     val context = LocalContext.current
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -66,17 +68,20 @@ fun MemoryMappApp() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     
+    val currentUser by authViewModel.currentUser.collectAsState()
     var isTracking by remember { mutableStateOf(LocationService.isRunning) }
     
     // Media Scanner instance
     val mediaScanner = remember { MediaScanner(context) }
 
     // Content Observer to sync with gallery real-time (Deletions/Additions)
-    DisposableEffect(Unit) {
+    DisposableEffect(currentUser) {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
                 scope.launch {
-                    mediaScanner.scanGallery()
+                    currentUser?.uid?.let { uid ->
+                        mediaScanner.scanGallery(uid)
+                    }
                 }
             }
         }
@@ -124,16 +129,20 @@ fun MemoryMappApp() {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        // Initial scan on startup
-        scope.launch {
-            mediaScanner.scanGallery()
+    }
+    
+    LaunchedEffect(currentUser) {
+        // Initial scan on startup or when user changes
+        currentUser?.uid?.let { uid ->
+            mediaScanner.scanGallery(uid)
         }
     }
 
     // Start/Stop Service based on tracking state
-    LaunchedEffect(isTracking) {
+    LaunchedEffect(isTracking, currentUser) {
         val intent = Intent(context, LocationService::class.java)
-        if (isTracking) {
+        if (isTracking && currentUser != null) {
+            intent.putExtra("USER_ID", currentUser?.uid)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -212,60 +221,85 @@ fun MemoryMappApp() {
         ) { innerPadding ->
             NavHost(
                 navController = navController, 
-                startDestination = "title",
+                startDestination = if (currentUser != null) "activity" else "title",
                 modifier = Modifier.padding(if (showMainUI) innerPadding else PaddingValues(0.dp))
             ) {
                 composable("title") {
-                    TitleScreen(onStartClick = { navController.navigate("account") })
+                    TitleScreen(onStartClick = { navController.navigate("login") })
+                }
+                composable("login") {
+                    LoginScreen(
+                        onSignUpClick = { navController.navigate("account") },
+                        onLoginSuccess = { 
+                            navController.navigate("activity") {
+                                popUpTo("login") { inclusive = true }
+                            }
+                        },
+                        viewModel = authViewModel
+                    )
                 }
                 composable("account") {
                     AccountScreen(
                         onBackClick = { navController.popBackStack() },
-                        onCreateAccountClick = { navController.navigate("activity") }
+                        onAccountCreated = { 
+                            navController.navigate("activity") {
+                                popUpTo("account") { inclusive = true }
+                            }
+                        },
+                        viewModel = authViewModel
                     )
                 }
                 composable("activity") {
-                    ActivityScreen(
-                        onMenuClick = { scope.launch { drawerState.open() } },
-                        isTracking = isTracking,
-                        onToggleTracking = { isTracking = it },
-                        startDate = sharedStartDate,
-                        endDate = sharedEndDate,
-                        onPeriodChange = { start, end ->
-                            sharedStartDate = start
-                            sharedEndDate = end
-                        },
-                        onAddTrip = {
-                            shouldShowAddTripInitially = true
-                            navController.navigate("trips")
-                        }
-                    )
+                    currentUser?.uid?.let { uid ->
+                        ActivityScreen(
+                            userId = uid,
+                            onMenuClick = { scope.launch { drawerState.open() } },
+                            isTracking = isTracking,
+                            onToggleTracking = { isTracking = it },
+                            startDate = sharedStartDate,
+                            endDate = sharedEndDate,
+                            onPeriodChange = { start, end ->
+                                sharedStartDate = start
+                                sharedEndDate = end
+                            },
+                            onAddTrip = {
+                                shouldShowAddTripInitially = true
+                                navController.navigate("trips")
+                            }
+                        )
+                    }
                 }
                 composable("memories") {
-                    MemoriesScreen(
-                        onMenuClick = { scope.launch { drawerState.open() } },
-                        startDate = sharedStartDate,
-                        endDate = sharedEndDate,
-                        onPeriodChange = { start, end ->
-                            sharedStartDate = start
-                            sharedEndDate = end
-                        },
-                        onAddTrip = {
-                            shouldShowAddTripInitially = true
-                            navController.navigate("trips")
-                        }
-                    )
+                    currentUser?.uid?.let { uid ->
+                        MemoriesScreen(
+                            userId = uid,
+                            onMenuClick = { scope.launch { drawerState.open() } },
+                            startDate = sharedStartDate,
+                            endDate = sharedEndDate,
+                            onPeriodChange = { start, end ->
+                                sharedStartDate = start
+                                sharedEndDate = end
+                            },
+                            onAddTrip = {
+                                shouldShowAddTripInitially = true
+                                navController.navigate("trips")
+                            }
+                        )
+                    }
                 }
                 composable("trips") {
-                    TripsScreen(
-                        onMenuClick = { scope.launch { drawerState.open() } },
-                        onTripClick = { tripId ->
-                            navController.navigate("trip_detail/$tripId")
-                        },
-                        initialStartDate = sharedStartDate,
-                        initialEndDate = sharedEndDate,
-                        showAddInitially = shouldShowAddTripInitially
-                    )
+                    currentUser?.uid?.let { uid ->
+                        TripsScreen(
+                            userId = uid,
+                            onMenuClick = { scope.launch { drawerState.open() } },
+                            onTripClick = { tripId ->
+                                navController.navigate("trip_detail/$tripId")
+                            },
+                            initialStartDate = sharedStartDate,
+                            initialEndDate = sharedEndDate,
+                            showAddInitially = shouldShowAddTripInitially
+                        )
+                    }
                     // Reset flag after use
                     SideEffect {
                         shouldShowAddTripInitially = false
@@ -276,40 +310,36 @@ fun MemoryMappApp() {
                     arguments = listOf(navArgument("tripId") { type = NavType.LongType })
                 ) { backStackEntry ->
                     val tripId = backStackEntry.arguments?.getLong("tripId") ?: 0L
-                    TripDetailScreen(
-                        tripId = tripId,
-                        onBackClick = { navController.popBackStack() },
-                        onViewPicturesClick = { id ->
-                            // For simplicity, we can just navigate to memories with specific dates
-                            // Or we could create a TripPicturesScreen. 
-                            // Let's use MemoriesScreen but we might need to adjust it to show the trip name.
-                            // To keep it simple, let's update shared state and navigate to memories.
-                            scope.launch {
-                                val db = si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase.getDatabase(context)
-                                val trips = db.locationDao().getAllMediaSync() // This is wrong, I need trip details
-                                // Actually, TripDetailScreen already has the trip. 
-                                // I'll pass start/end times via navigation if possible, or just use a shared state.
+                    currentUser?.uid?.let { uid ->
+                        TripDetailScreen(
+                            userId = uid,
+                            tripId = tripId,
+                            onBackClick = { navController.popBackStack() },
+                            onViewPicturesClick = { id ->
+                                navController.navigate("trip_pictures/$id")
                             }
-                            navController.navigate("trip_pictures/$id")
-                        }
-                    )
+                        )
+                    }
                 }
                 composable(
                     "trip_pictures/{tripId}",
                     arguments = listOf(navArgument("tripId") { type = NavType.LongType })
                 ) { backStackEntry ->
                     val tripId = backStackEntry.arguments?.getLong("tripId") ?: 0L
-                    // We'll create a variant of MemoriesScreen for trips
-                    TripMemoriesScreen(
-                        tripId = tripId,
-                        onBackClick = { navController.popBackStack() }
-                    )
+                    currentUser?.uid?.let { uid ->
+                        TripMemoriesScreen(
+                            userId = uid,
+                            tripId = tripId,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
                 }
                 composable("account_settings") {
                     AccountSettingsScreen(
                         onMenuClick = { scope.launch { drawerState.open() } },
                         onLogoutClick = { 
-                            navController.navigate("account") {
+                            authViewModel.logout()
+                            navController.navigate("login") {
                                 popUpTo("activity") { inclusive = true }
                             }
                         }

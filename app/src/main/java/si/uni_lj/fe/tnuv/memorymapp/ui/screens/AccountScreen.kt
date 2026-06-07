@@ -22,18 +22,34 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.InputBg
+import si.uni_lj.fe.tnuv.memorymapp.ui.viewmodels.AuthViewModel
 
 @Composable
-fun AccountScreen(onBackClick: () -> Unit, onCreateAccountClick: () -> Unit) {
+fun AccountScreen(
+    onBackClick: () -> Unit,
+    onAccountCreated: () -> Unit,
+    viewModel: AuthViewModel = viewModel()
+) {
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+
+    val error by viewModel.error.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+
+    LaunchedEffect(currentUser) {
+        if (currentUser != null) {
+            onAccountCreated()
+        }
+    }
 
     val scrollState = rememberScrollState()
 
@@ -145,6 +161,15 @@ fun AccountScreen(onBackClick: () -> Unit, onCreateAccountClick: () -> Unit) {
                 .padding(top = 8.dp)
         )
 
+        if (error != null) {
+            Text(
+                text = error!!,
+                color = Color.Red,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
         // Create Account Button
@@ -158,15 +183,21 @@ fun AccountScreen(onBackClick: () -> Unit, onCreateAccountClick: () -> Unit) {
                     ),
                     shape = RoundedCornerShape(28.dp)
                 )
-                .clickable { onCreateAccountClick() },
+                .clickable(enabled = !isLoading) {
+                    viewModel.signUp(email, password, fullName)
+                },
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "Create account",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            if (isLoading) {
+                CircularProgressIndicator(color = Color.White)
+            } else {
+                Text(
+                    text = "Create account",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))

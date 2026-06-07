@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoriesScreen(
+    userId: String, // Added userId
     onMenuClick: () -> Unit,
     startDate: Calendar,
     endDate: Calendar,
@@ -122,7 +123,8 @@ fun MemoriesScreen(
         cal.timeInMillis
     }
 
-    val allMediaForPeriod by locationDao.getMediaInRange(startTimeMillis, endTimeMillis)
+    // Filter by userId
+    val allMediaForPeriod by locationDao.getMediaInRange(userId, startTimeMillis, endTimeMillis)
         .collectAsState(initial = emptyList())
 
     // Filter State
@@ -225,7 +227,7 @@ fun MemoriesScreen(
                             item = item,
                             onLikeToggle = {
                                 scope.launch {
-                                    locationDao.updateMediaLikeStatus(item.id, !item.isLiked)
+                                    locationDao.updateMediaLikeStatus(item.id, userId, !item.isLiked)
                                 }
                             },
                             onClick = {

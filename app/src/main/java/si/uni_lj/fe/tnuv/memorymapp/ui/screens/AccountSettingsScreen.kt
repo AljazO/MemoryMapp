@@ -17,14 +17,37 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.InputBg
+import si.uni_lj.fe.tnuv.memorymapp.ui.viewmodels.AuthViewModel
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
-fun AccountSettingsScreen(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
+fun AccountSettingsScreen(
+    onMenuClick: () -> Unit,
+    onLogoutClick: () -> Unit,
+    viewModel: AuthViewModel = viewModel()
+) {
+    val currentUser by viewModel.currentUser.collectAsState()
+    
+    var isEditing by remember { mutableStateOf(false) }
+    
     var name by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var bio by remember { mutableStateOf("") }
+
+    // Update local state when currentUser changes (e.g., on first load)
+    LaunchedEffect(currentUser) {
+        currentUser?.let {
+            if (!isEditing) {
+                name = it.fullName
+                username = it.username
+                bio = it.bio
+            }
+        }
+    }
 
     val scrollState = rememberScrollState()
 
@@ -36,13 +59,40 @@ fun AccountSettingsScreen(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onMenuClick) {
-                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(32.dp))
+                if (isEditing) {
+                    IconButton(onClick = { 
+                        // Cancel: Reset to current user values and exit edit mode
+                        currentUser?.let {
+                            name = it.fullName
+                            username = it.username
+                            bio = it.bio
+                        }
+                        isEditing = false 
+                    }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
+                } else {
+                    IconButton(onClick = onMenuClick) {
+                        Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
                 }
+                
                 Spacer(modifier = Modifier.weight(1f))
                 Text("My account", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.weight(1f))
-                Box(modifier = Modifier.size(32.dp))
+                
+                if (isEditing) {
+                    IconButton(onClick = { 
+                        viewModel.updateProfile(name, username, bio)
+                        isEditing = false
+                    }) {
+                        Icon(Icons.Default.Check, contentDescription = "Save", tint = Color(0xFF6E6EF7), modifier = Modifier.size(32.dp))
+                    }
+                } else {
+                    IconButton(onClick = { isEditing = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
+                }
             }
         },
         containerColor = Color.Black
@@ -70,16 +120,20 @@ fun AccountSettingsScreen(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
                     Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(60.dp))
                 }
             }
-            TextButton(onClick = { /* Change photo */ }) {
-                Text("Change photo", color = Color(0xFF6E6EF7), fontSize = 12.sp)
+            if (isEditing) {
+                TextButton(onClick = { /* Change photo */ }) {
+                    Text("Change photo", color = Color(0xFF6E6EF7), fontSize = 12.sp)
+                }
+            } else {
+                Spacer(modifier = Modifier.height(32.dp))
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Fields
-            EditableAccountField("Name and surname", name, "Name and surname") { name = it }
+            AccountField("Name and surname", name, "Name and surname", isEditing) { name = it }
             Spacer(modifier = Modifier.height(16.dp))
-            EditableAccountField("Username", username, "@username") { 
+            AccountField("Username", username, "@username", isEditing) { 
                 if (it.startsWith("@") || it.isEmpty()) {
                     username = it
                 } else {
@@ -87,40 +141,66 @@ fun AccountSettingsScreen(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (!isEditing) {
+                StatRow("Email address", currentUser?.email ?: "")
+                Spacer(modifier = Modifier.height(16.dp))
+            }
             
             Text("Bio", color = Color.White, fontSize = 14.sp, modifier = Modifier.fillMaxWidth())
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = bio,
-                onValueChange = { bio = it },
-                modifier = Modifier.fillMaxWidth().height(120.dp),
-                placeholder = { Text("Insert text", color = Color.Gray) },
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Gray,
-                    focusedBorderColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+            
+            if (isEditing) {
+                OutlinedTextField(
+                    value = bio,
+                    onValueChange = { bio = it },
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    placeholder = { Text("Insert text", color = Color.Gray) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedBorderColor = Color.White,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
                 )
-            )
+            } else {
+                Text(
+                    text = bio.ifEmpty { "No bio added" },
+                    color = if (bio.isEmpty()) Color.Gray else Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                )
+                HorizontalDivider(color = Color.DarkGray, thickness = 0.5.dp)
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
             // Footer Stats
-            StatRow("Member since", "23.04.2026")
+            val memberSince = remember(currentUser?.createdAt) {
+                currentUser?.createdAt?.let {
+                    SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(it))
+                } ?: "N/A"
+            }
+            
+            StatRow("Member since", memberSince)
             Spacer(modifier = Modifier.height(12.dp))
-            StatRow("Total distance covered", "571.58 km")
+            StatRow("Total distance covered", "0 km") 
             Spacer(modifier = Modifier.height(12.dp))
-            StatRow("Total photos and videos taken", "214")
+            StatRow("Total photos and videos taken", "0") 
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Want to change your account? ", color = Color.Gray, fontSize = 14.sp)
-                TextButton(onClick = onLogoutClick, contentPadding = PaddingValues(0.dp)) {
-                    Text("Log out", color = Color(0xFF6E6EF7), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            if (!isEditing) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Want to change your account? ", color = Color.Gray, fontSize = 14.sp)
+                    TextButton(onClick = onLogoutClick, contentPadding = PaddingValues(0.dp)) {
+                        Text("Log out", color = Color(0xFF6E6EF7), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             
@@ -130,26 +210,36 @@ fun AccountSettingsScreen(onMenuClick: () -> Unit, onLogoutClick: () -> Unit) {
 }
 
 @Composable
-fun EditableAccountField(label: String, value: String, placeholder: String, onValueChange: (String) -> Unit) {
+fun AccountField(label: String, value: String, placeholder: String, isEditing: Boolean, onValueChange: (String) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(label, color = Color.White, fontSize = 14.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(placeholder, color = Color.Gray) },
-            shape = RoundedCornerShape(12.dp),
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedBorderColor = Color.Gray,
-                focusedBorderColor = Color.White,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
+        Text(label, color = Color.Gray, fontSize = 12.sp)
+        if (isEditing) {
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(placeholder, color = Color.Gray) },
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Gray,
+                    focusedBorderColor = Color.White,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
             )
-        )
+        } else {
+            Text(
+                text = value.ifEmpty { placeholder },
+                color = if (value.isEmpty()) Color.Gray else Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            HorizontalDivider(color = Color.DarkGray, thickness = 0.5.dp)
+        }
     }
 }
 

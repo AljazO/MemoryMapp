@@ -17,21 +17,22 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
-import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import si.uni_lj.fe.tnuv.memorymapp.MainActivity
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
+import si.uni_lj.fe.tnuv.memorymapp.utils.LocationTracker
+import si.uni_lj.fe.tnuv.memorymapp.utils.TrackSmoother
 
 class LocationService : Service(), SensorEventListener {
 
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
+    private lateinit var tracker: LocationTracker
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastSavedLocation: Location? = null
+    private var serviceStartTime: Long = 0
+    private var currentUserId: String? = null
     
     private var sensorManager: SensorManager? = null
     private var stepCounterSensor: Sensor? = null
@@ -41,7 +42,12 @@ class LocationService : Service(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        serviceStartTime = System.currentTimeMillis()
+
+        // Initialize the new tracker with a callback to save significant locations
+        tracker = LocationTracker(this) { location ->
+            saveLocation(location)
+        }
         
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
@@ -58,16 +64,6 @@ class LocationService : Service(), SensorEventListener {
             }
         }
         
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                result.locations.lastOrNull()?.let { location ->
-                    if (isValidLocation(location)) {
-                        saveLocation(location)
-                    }
-                }
-            }
-        }
-        
         startStationaryStepTracking()
     }
 
@@ -75,8 +71,15 @@ class LocationService : Service(), SensorEventListener {
         serviceScope.launch {
             while (isRunning) {
                 delay(60000)
+                // If we take steps while stationary, save a point to record the step count update
                 if (currentTotalSteps > lastSavedStepCount) {
                     lastSavedLocation?.let { saveLocation(it) }
+                }
+                
+                // Periodic background smoothing (every 5 minutes)
+                if (System.currentTimeMillis() % 300000 < 60000) {
+                    val db = AppDatabase.getDatabase(applicationContext)
+                    TrackSmoother.smoothTrack(db.locationDao(), currentUserId, serviceStartTime, System.currentTimeMillis())
                 }
             }
         }
@@ -90,26 +93,6 @@ class LocationService : Service(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-    private fun isValidLocation(location: Location): Boolean {
-        // 1. Accuracy check: ignore points with low accuracy (relaxed slightly)
-        if (location.accuracy > 50) return false
-
-        // 2. Minimum distance check to avoid jitter when stationary
-        lastSavedLocation?.let { last ->
-            val distance = last.distanceTo(location)
-            if (distance < 2.0) return false
-
-            // 3. Speed check: ignore unrealistic jumps (e.g. > 180 km/h or 50 m/s)
-            val timeDelta = (location.time - last.time) / 1000.0
-            if (timeDelta > 0) {
-                val speed = distance / timeDelta
-                if (speed > 50.0) return false
-            }
-        }
-
-        return true
-    }
-
     private fun saveLocation(location: Location) {
         lastSavedLocation = location
         lastSavedStepCount = currentTotalSteps
@@ -117,6 +100,7 @@ class LocationService : Service(), SensorEventListener {
             val db = AppDatabase.getDatabase(applicationContext)
             db.locationDao().insert(
                 LocationPoint(
+                    userId = currentUserId, // Save point with current userId
                     latitude = location.latitude,
                     longitude = location.longitude,
                     timestamp = System.currentTimeMillis(),
@@ -129,6 +113,8 @@ class LocationService : Service(), SensorEventListener {
 
     @SuppressLint("MissingPermission")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        currentUserId = intent?.getStringExtra("USER_ID")
+        
         createNotificationChannel()
         
         val notificationIntent = Intent(this, MainActivity::class.java)
@@ -139,7 +125,7 @@ class LocationService : Service(), SensorEventListener {
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Memory Mapp")
-            .setContentText("Tracking your location and stats in the background")
+            .setContentText("Recording your journey smoothly...")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -151,25 +137,29 @@ class LocationService : Service(), SensorEventListener {
             startForeground(NOTIFICATION_ID, notification)
         }
         
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000)
-            .setMinUpdateIntervalMillis(5000)
-            .build()
-            
-        fusedLocationClient.requestLocationUpdates(
-            request,
-            locationCallback,
-            Looper.getMainLooper()
-        )
+        tracker.start()
         
         return START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         isRunning = false
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        tracker.stop()
         sensorManager?.unregisterListener(this)
-        serviceScope.cancel()
+        
+        // Final smoothing on stop, using GlobalScope to ensure it finishes after service is destroyed
+        val finalStartTime = serviceStartTime
+        val finalEndTime = System.currentTimeMillis()
+        val context = applicationContext
+        val userId = currentUserId
+        @OptIn(DelicateCoroutinesApi::class)
+        GlobalScope.launch(Dispatchers.IO) {
+            val db = AppDatabase.getDatabase(context)
+            TrackSmoother.smoothTrack(db.locationDao(), userId, finalStartTime, finalEndTime)
+            serviceScope.cancel()
+        }
+        
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

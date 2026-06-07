@@ -27,6 +27,7 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TripMemoriesScreen(
+    userId: String, // Added userId
     tripId: Long,
     onBackClick: () -> Unit
 ) {
@@ -35,7 +36,7 @@ fun TripMemoriesScreen(
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
 
-    val trips by locationDao.getAllTrips().collectAsState(initial = emptyList())
+    val trips by locationDao.getAllTrips(userId).collectAsState(initial = emptyList())
     val trip = trips.find { it.id == tripId }
 
     if (trip == null) {
@@ -45,7 +46,7 @@ fun TripMemoriesScreen(
         return
     }
 
-    val filteredMedia by locationDao.getMediaInRange(trip.startTime, trip.endTime)
+    val filteredMedia by locationDao.getMediaInRange(userId, trip.startTime, trip.endTime)
         .collectAsState(initial = emptyList())
 
     var selectedMedia by remember { mutableStateOf<MediaPoint?>(null) }
@@ -101,7 +102,7 @@ fun TripMemoriesScreen(
                             item = item,
                             onLikeToggle = {
                                 scope.launch {
-                                    locationDao.updateMediaLikeStatus(item.id, !item.isLiked)
+                                    locationDao.updateMediaLikeStatus(item.id, userId, !item.isLiked)
                                 }
                             },
                             onClick = {

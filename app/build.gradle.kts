@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.googleServices)
 }
 
 android {
@@ -53,6 +54,13 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.androidx.exifinterface)
     
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.kotlinx.coroutines.play.services)
+
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0")
@@ -69,6 +77,4 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-
-
 }

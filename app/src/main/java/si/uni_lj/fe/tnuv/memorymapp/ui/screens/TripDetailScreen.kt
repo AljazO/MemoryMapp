@@ -42,6 +42,7 @@ import java.util.*
 
 @Composable
 fun TripDetailScreen(
+    userId: String, // Added userId
     tripId: Long,
     onBackClick: () -> Unit,
     onViewPicturesClick: (Long) -> Unit
@@ -51,7 +52,7 @@ fun TripDetailScreen(
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
 
-    val trips by locationDao.getAllTrips().collectAsState(initial = emptyList())
+    val trips by locationDao.getAllTrips(userId).collectAsState(initial = emptyList())
     val trip = trips.find { it.id == tripId }
 
     if (trip == null) {
@@ -61,8 +62,8 @@ fun TripDetailScreen(
         return
     }
 
-    val pathPoints by locationDao.getPointsInRange(trip.startTime, trip.endTime).collectAsState(initial = emptyList())
-    val mediaPoints by locationDao.getMediaInRange(trip.startTime, trip.endTime).collectAsState(initial = emptyList())
+    val pathPoints by locationDao.getPointsInRange(userId, trip.startTime, trip.endTime).collectAsState(initial = emptyList())
+    val mediaPoints by locationDao.getMediaInRange(userId, trip.startTime, trip.endTime).collectAsState(initial = emptyList())
 
     // Slider State
     var sliderValue by remember { mutableFloatStateOf(1f) }

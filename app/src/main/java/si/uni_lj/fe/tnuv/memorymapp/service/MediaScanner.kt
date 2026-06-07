@@ -17,45 +17,43 @@ import kotlinx.coroutines.CancellationException
 
 class MediaScanner(private val context: Context) {
 
-    suspend fun scanGallery() = withContext(Dispatchers.IO) {
+    suspend fun scanGallery(userId: String) = withContext(Dispatchers.IO) {
         try {
             val database = AppDatabase.getDatabase(context)
             val dao = database.locationDao()
-            val existingIds = dao.getAllMediaIds().toSet()
-
-            // 1. Fetch images
-            val foundImages = scanImages(existingIds)
-
-            // 2. Fetch videos
-            val foundVideos = scanVideos(existingIds)
-
+            
+            // 1. Fetch ALL images and videos from MediaStore
+            val foundImages = scanImages(userId)
+            val foundVideos = scanVideos(userId)
             val allFoundIds = foundImages + foundVideos
 
-            // 3. Cleanup: Remove media from DB that no longer exists in MediaStore or is inaccessible
-            val idsToRemove = existingIds.filter { !allFoundIds.contains(it) }
+            // 2. Cleanup: Remove media from DB that:
+            // - No longer exists in MediaStore
+            // - OR belongs to this user but shouldn't (no location points)
+            val existingIdsInDb = dao.getAllMediaIds(userId).toSet()
+            val idsToRemove = existingIdsInDb.filter { !allFoundIds.contains(it) }
+            
             if (idsToRemove.isNotEmpty()) {
-                Log.d("MediaScanner", "Removing ${idsToRemove.size} stale media items from database")
+                Log.d("MediaScanner", "Cleaning up ${idsToRemove.size} media items for user $userId")
                 idsToRemove.forEach { id ->
-                    dao.deleteMediaById(id)
+                    dao.deleteMediaById(id, userId)
                 }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            Log.e("MediaScanner", "Error scanning gallery", e)
+            Log.e("MediaScanner", "Error scanning gallery for user $userId", e)
         }
     }
 
     private fun isUriAccessible(uri: Uri): Boolean {
         return try {
-            // Verifies the file actually exists and is readable.
-            // This catches cases where MediaStore index is stale after a deletion.
             context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
         } catch (e: Exception) {
             false
         }
     }
 
-    private suspend fun scanImages(existingIds: Set<String>): Set<String> {
+    private suspend fun scanImages(userId: String): Set<String> {
         val foundIds = mutableSetOf<String>()
         val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val pathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -92,39 +90,36 @@ class MediaScanner(private val context: Context) {
             } else -1
 
             while (it.moveToNext()) {
-                // Ignore trashed items
                 if (trashedColIndex != -1 && it.getInt(trashedColIndex) != 0) continue
 
                 val mediaId = it.getLong(idColumn)
                 val stringId = "img_$mediaId"
                 val contentUri = ContentUris.withAppendedId(uri, mediaId)
 
-                // Verify file actually exists and is accessible
                 if (!isUriAccessible(contentUri)) continue
 
-                // Filter out Screenshots and Downloads
                 val path = it.getString(pathColIndex) ?: ""
                 if (path.contains("Screenshots", ignoreCase = true) ||
                     path.contains("Download", ignoreCase = true)) {
                     continue
                 }
 
-                foundIds.add(stringId)
-
-                if (existingIds.contains(stringId)) continue
-
                 var date = it.getLong(dateTakenColumn)
                 if (date == 0L) {
-                    date = it.getLong(dateAddedColumn) * 1000 // DATE_ADDED is in seconds
+                    date = it.getLong(dateAddedColumn) * 1000
                 }
 
-                processImageInsertion(stringId, contentUri, date)
+                // VALIDATION: Only add to foundIds if user was active
+                if (wasUserActive(userId, date)) {
+                    foundIds.add(stringId)
+                    processImageInsertion(userId, stringId, contentUri, date)
+                }
             }
         }
         return foundIds
     }
 
-    private suspend fun scanVideos(existingIds: Set<String>): Set<String> {
+    private suspend fun scanVideos(userId: String): Set<String> {
         val foundIds = mutableSetOf<String>()
         val uri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         val pathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -175,34 +170,40 @@ class MediaScanner(private val context: Context) {
                     continue
                 }
 
-                foundIds.add(stringId)
-
-                if (existingIds.contains(stringId)) continue
-
                 var date = it.getLong(dateTakenColumn)
                 if (date == 0L) {
                     date = it.getLong(dateAddedColumn) * 1000
                 }
 
-                processVideoInsertion(stringId, contentUri, date)
+                // VALIDATION: Only add to foundIds if user was active
+                if (wasUserActive(userId, date)) {
+                    foundIds.add(stringId)
+                    processVideoInsertion(userId, stringId, contentUri, date)
+                }
             }
         }
         return foundIds
     }
 
-    private suspend fun processImageInsertion(id: String, contentUri: Uri, date: Long) {
+    private suspend fun wasUserActive(userId: String, timestamp: Long): Boolean {
+        val database = AppDatabase.getDatabase(context)
+        val dao = database.locationDao()
+        val range = 300000L // 5 minutes
+        val points = dao.getPointsInRangeSync(userId, timestamp - range, timestamp + range)
+        return points.isNotEmpty()
+    }
+
+    private suspend fun processImageInsertion(userId: String, id: String, contentUri: Uri, date: Long) {
         val database = AppDatabase.getDatabase(context)
         val dao = database.locationDao()
         
+        // Skip if already in DB to avoid unnecessary processing
+        val existingIds = dao.getAllMediaIds(userId)
+        if (existingIds.contains(id)) return
+
         val photoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                MediaStore.setRequireOriginal(contentUri)
-            } catch (e: Exception) {
-                contentUri
-            }
-        } else {
-            contentUri
-        }
+            try { MediaStore.setRequireOriginal(contentUri) } catch (e: Exception) { contentUri }
+        } else { contentUri }
 
         try {
             var lat: Double? = null
@@ -218,8 +219,8 @@ class MediaScanner(private val context: Context) {
             }
 
             if (lat == null || lon == null) {
-                val range = 300000L // 5 minutes
-                val closest = dao.getPointsInRangeSync(date - range, date + range)
+                val range = 300000L
+                val closest = dao.getPointsInRangeSync(userId, date - range, date + range)
                     .minByOrNull { Math.abs(it.timestamp - date) }
                 if (closest != null) {
                     lat = closest.latitude
@@ -228,26 +229,20 @@ class MediaScanner(private val context: Context) {
             }
 
             if (lat != null && lon != null) {
-                dao.insertMedia(
-                    MediaPoint(
-                        id = id,
-                        uri = contentUri.toString(),
-                        latitude = lat!!,
-                        longitude = lon!!,
-                        timestamp = date,
-                        type = MediaType.IMAGE
-                    )
-                )
+                dao.insertMedia(MediaPoint(id, userId, contentUri.toString(), lat!!, lon!!, date, MediaType.IMAGE))
             }
         } catch (e: Exception) {
-            if (e is CancellationException) throw e
             Log.w("MediaScanner", "Failed to process image $id", e)
         }
     }
 
-    private suspend fun processVideoInsertion(id: String, contentUri: Uri, date: Long) {
+    private suspend fun processVideoInsertion(userId: String, id: String, contentUri: Uri, date: Long) {
         val database = AppDatabase.getDatabase(context)
         val dao = database.locationDao()
+        
+        val existingIds = dao.getAllMediaIds(userId)
+        if (existingIds.contains(id)) return
+
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, contentUri)
@@ -264,8 +259,8 @@ class MediaScanner(private val context: Context) {
             }
 
             if (lat == null || lon == null) {
-                val range = 300000L // 5 minutes
-                val closest = dao.getPointsInRangeSync(date - range, date + range)
+                val range = 300000L
+                val closest = dao.getPointsInRangeSync(userId, date - range, date + range)
                     .minByOrNull { Math.abs(it.timestamp - date) }
                 if (closest != null) {
                     lat = closest.latitude
@@ -274,26 +269,12 @@ class MediaScanner(private val context: Context) {
             }
 
             if (lat != null && lon != null) {
-                dao.insertMedia(
-                    MediaPoint(
-                        id = id,
-                        uri = contentUri.toString(),
-                        latitude = lat!!,
-                        longitude = lon!!,
-                        timestamp = date,
-                        type = MediaType.VIDEO
-                    )
-                )
+                dao.insertMedia(MediaPoint(id, userId, contentUri.toString(), lat!!, lon!!, date, MediaType.VIDEO))
             }
         } catch (e: Exception) {
-            if (e is CancellationException) throw e
             Log.w("MediaScanner", "Failed to process video $id", e)
         } finally {
-            try {
-                retriever.release()
-            } catch (e: Exception) {
-                // Ignore release errors
-            }
+            try { retriever.release() } catch (e: Exception) {}
         }
     }
 
@@ -306,8 +287,6 @@ class MediaScanner(private val context: Context) {
                 val lon = match.groupValues[2].toDouble()
                 Pair(lat, lon)
             } else null
-        } catch (e: Exception) {
-            null
-        }
+        } catch (e: Exception) { null }
     }
 }
