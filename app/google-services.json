@@ -12,7 +12,12 @@
           "package_name": "si.uni_lj.fe.tnuv.memorymapp"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "23713767824-0bbi0udfsbmnid3gjkj6ltibq5142eem.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBeDSwgoJgcb6_w5Ofd098lifpeXLFRDCg"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "23713767824-0bbi0udfsbmnid3gjkj6ltibq5142eem.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
