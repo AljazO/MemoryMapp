@@ -1,7 +1,6 @@
 package si.uni_lj.fe.tnuv.memorymapp.data
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
 
 enum class MediaType {
     IMAGE, VIDEO

@@ -24,8 +24,8 @@ import kotlinx.coroutines.launch
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.DataRepository
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
-import si.uni_lj.fe.tnuv.memorymapp.ui.theme.InputBg
 import si.uni_lj.fe.tnuv.memorymapp.ui.viewmodels.AuthViewModel
+import si.uni_lj.fe.tnuv.memorymapp.utils.StatisticsCalculator
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -40,7 +40,8 @@ fun AccountSettingsScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     
     val database = remember { AppDatabase.getDatabase(context) }
-    val repository = remember { DataRepository(database.locationDao()) }
+    val locationDao = database.locationDao()
+    val repository = remember { DataRepository(locationDao) }
     
     var isEditing by remember { mutableStateOf(false) }
     var isSyncing by remember { mutableStateOf(false) }
@@ -49,13 +50,36 @@ fun AccountSettingsScreen(
     var username by remember { mutableStateOf("") }
     var bio by remember { mutableStateOf("") }
 
+    // Statistics state
+    var totalDistance by remember { mutableStateOf(0.0) }
+    var totalMediaCount by remember { mutableStateOf(0) }
+
     // Update local state when currentUser changes (e.g., on first load)
     LaunchedEffect(currentUser) {
-        currentUser?.let {
+        currentUser?.let { user ->
             if (!isEditing) {
-                name = it.fullName
-                username = it.username
-                bio = it.bio
+                name = user.fullName
+                username = user.username
+                bio = user.bio
+            }
+
+            // Calculate Statistics
+            scope.launch {
+                // 1. Get Media Count
+                val mediaIds = locationDao.getAllMediaIds(user.uid)
+                totalMediaCount = mediaIds.size
+
+                // 2. Get Total Distance
+                val trips = locationDao.getAllTripsSync(user.uid)
+                var distanceSum = 0.0
+                for (trip in trips) {
+                    val points = locationDao.getPointsInRangeSync(user.uid, trip.startTime, trip.endTime)
+                    if (points.isNotEmpty()) {
+                        val stats = StatisticsCalculator.calculateStats(points, trip.startTime, trip.endTime)
+                        distanceSum += stats.distanceKm
+                    }
+                }
+                totalDistance = distanceSum
             }
         }
     }
@@ -72,7 +96,6 @@ fun AccountSettingsScreen(
             ) {
                 if (isEditing) {
                     IconButton(onClick = { 
-                        // Cancel: Reset to current user values and exit edit mode
                         currentUser?.let {
                             name = it.fullName
                             username = it.username
@@ -200,9 +223,9 @@ fun AccountSettingsScreen(
             
             StatRow("Member since", memberSince)
             Spacer(modifier = Modifier.height(12.dp))
-            StatRow("Total distance covered", "0 km") 
+            StatRow("Total distance covered", "%.2f km".format(totalDistance)) 
             Spacer(modifier = Modifier.height(12.dp))
-            StatRow("Total photos and videos taken", "0") 
+            StatRow("Total photos and videos taken", totalMediaCount.toString())
 
             Spacer(modifier = Modifier.height(32.dp))
 

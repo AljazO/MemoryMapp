@@ -8,13 +8,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -41,43 +37,29 @@ import com.google.android.gms.maps.model.JointType
 import com.google.android.gms.maps.model.RoundCap
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.collect
 import androidx.compose.runtime.collectAsState
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.*
 import android.os.Build
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
-import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
 import si.uni_lj.fe.tnuv.memorymapp.service.MediaScanner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.Marker
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import androidx.core.content.res.ResourcesCompat
 import androidx.compose.foundation.Image
 import coil.compose.rememberAsyncImagePainter
-import android.net.Uri
-import android.content.Context
-import androidx.compose.ui.graphics.asImageBitmap
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.StatisticsWindow
 import si.uni_lj.fe.tnuv.memorymapp.utils.MapUtils
-import si.uni_lj.fe.tnuv.memorymapp.utils.StatisticsCalculator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,7 +75,6 @@ fun ActivityScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val lifecycleOwner = LocalLifecycleOwner.current
 
     val isSingleDay = remember(startDate, endDate) {
         startDate.get(Calendar.YEAR) == endDate.get(Calendar.YEAR) &&
@@ -161,16 +142,6 @@ fun ActivityScreen(
         )
     }
 
-    var hasActivityPermission by remember {
-        mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
-            } else {
-                true
-            }
-        )
-    }
-
     val combinedPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -184,15 +155,8 @@ fun ActivityScreen(
         val locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         
-        val activityGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissions[Manifest.permission.ACTIVITY_RECOGNITION] == true
-        } else {
-            true
-        }
-        
         hasMediaPermission = mediaGranted
         hasLocationPermission = locationGranted
-        hasActivityPermission = activityGranted
     }
 
     LaunchedEffect(Unit) {
@@ -504,7 +468,7 @@ fun ActivityScreen(
                         Slider(value = sliderValue, onValueChange = { val maxAllowed = if (isToday) ((daysCountTotal - 1) * 1440f) + currentMinutesOfToday else totalMinutesTotal - 1f; sliderValue = it.coerceIn(0f, maxAllowed); isUserInteracting = false }, valueRange = 0f..(totalMinutesTotal - 1f), colors = SliderDefaults.colors(thumbColor = Color(0xFF6E6EF7), activeTrackColor = Color(0xFF6E6EF7), inactiveTrackColor = Color.White.copy(alpha = 0.2f), activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent), modifier = Modifier.fillMaxSize())
                         if (daysCountTotal > 1) {
                             Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                for (i in 1 until daysCountTotal) { Spacer(modifier = Modifier.weight(1f)); Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape)) }
+                                for (i in 1..<daysCountTotal) { Spacer(modifier = Modifier.weight(1f)); Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape)) }
                                 Spacer(modifier = Modifier.weight(1f))
                             }
                         }
@@ -586,8 +550,6 @@ fun ActivityTopBar(startDate: Calendar, endDate: Calendar, onMenuClick: () -> Un
 
 @Composable
 fun SidebarContent(isTracking: Boolean, onToggleTracking: () -> Unit, onCloseClick: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     Column(modifier = Modifier.fillMaxHeight().padding(horizontal = 24.dp)) {
         Spacer(modifier = Modifier.height(48.dp))
         Box(modifier = Modifier.height(48.dp), contentAlignment = Alignment.CenterStart) { IconButton(onClick = onCloseClick, modifier = Modifier.offset(x = (-12).dp)) { Icon(imageVector = Icons.Default.Menu, contentDescription = "Close Menu", tint = Color.White, modifier = Modifier.size(32.dp)) } }

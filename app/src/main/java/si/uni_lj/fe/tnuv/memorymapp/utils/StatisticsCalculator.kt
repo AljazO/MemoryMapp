@@ -2,7 +2,6 @@ package si.uni_lj.fe.tnuv.memorymapp.utils
 
 import android.location.Location
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
-import java.util.*
 
 data class AdvancedStats(
     val distanceKm: Double = 0.0,

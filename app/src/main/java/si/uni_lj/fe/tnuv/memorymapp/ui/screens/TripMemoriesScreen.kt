@@ -1,6 +1,5 @@
 package si.uni_lj.fe.tnuv.memorymapp.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -22,7 +21,6 @@ import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
-import si.uni_lj.fe.tnuv.memorymapp.ui.theme.DarkBg
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -232,14 +232,3 @@ fun CalendarWindow(
         }
     }
 }
-
-@Composable
-fun CalendarInputField(placeholder: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .background(Color(0xFF2C2C2E), RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Text(text = placeholder, color = Color.Gray, fontSize = 12.sp)
-    }
-}

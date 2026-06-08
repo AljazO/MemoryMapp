@@ -2,7 +2,6 @@ package si.uni_lj.fe.tnuv.memorymapp.utils
 
 import android.location.Location
 import si.uni_lj.fe.tnuv.memorymapp.data.LocationDao
-import si.uni_lj.fe.tnuv.memorymapp.data.LocationPoint
 
 object TrackSmoother {
 

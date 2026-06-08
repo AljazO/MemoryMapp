@@ -31,7 +31,6 @@ import si.uni_lj.fe.tnuv.memorymapp.data.MediaPoint
 import si.uni_lj.fe.tnuv.memorymapp.data.MediaType
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.CalendarWindow
-import si.uni_lj.fe.tnuv.memorymapp.ui.components.SelectionInfoBar
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart

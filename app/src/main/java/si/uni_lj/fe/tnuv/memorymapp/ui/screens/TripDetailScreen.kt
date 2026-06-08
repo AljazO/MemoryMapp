@@ -1,7 +1,6 @@
 package si.uni_lj.fe.tnuv.memorymapp.ui.screens
 
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -24,7 +24,6 @@ import si.uni_lj.fe.tnuv.memorymapp.ui.components.MediaPreviewDialog
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.StatisticsWindow
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
-import coil.compose.rememberAsyncImagePainter
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.LatLng
@@ -87,7 +86,7 @@ fun TripDetailScreen(
     }
 
     val historyIndicatorPosition = pastPath.lastOrNull()
-    val historyMarkerState = rememberMarkerState()
+    val historyMarkerState = rememberUpdatedMarkerState(position = historyIndicatorPosition ?: LatLng(0.0, 0.0))
 
     val cameraPositionState = rememberCameraPositionState()
 
@@ -131,7 +130,6 @@ fun TripDetailScreen(
     // Follow history dot and update marker position
     LaunchedEffect(historyIndicatorPosition, isUserInteracting) {
         historyIndicatorPosition?.let { pos ->
-            historyMarkerState.position = pos
             if (!isUserInteracting) {
                 cameraPositionState.move(CameraUpdateFactory.newLatLng(pos))
             }
@@ -206,7 +204,7 @@ fun TripDetailScreen(
                             BitmapDescriptorFactory.fromBitmap(MapUtils.createMediaBitmap(context, media.type == MediaType.VIDEO))
                         }
                         Marker(
-                            state = rememberMarkerState(position = LatLng(media.latitude, media.longitude)),
+                            state = rememberUpdatedMarkerState(position = LatLng(media.latitude, media.longitude)),
                             icon = markerIcon,
                             onClick = {
                                 selectedMediaPoint = media
@@ -261,8 +259,9 @@ fun TripDetailScreen(
                     modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
-                    val sdfTime = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-                    val sdfDate = remember { SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()) }
+                    val locale = LocalConfiguration.current.locales[0]
+                    val sdfTime = remember(locale) { SimpleDateFormat("HH:mm", locale) }
+                    val sdfDate = remember(locale) { SimpleDateFormat("dd.MM.yyyy", locale) }
                     
                     val daysCount = remember(trip) {
                         val s = Calendar.getInstance().apply { timeInMillis = trip.startTime }
@@ -316,7 +315,7 @@ fun TripDetailScreen(
                         // White dots for day separators
                         if (daysCount > 1) {
                             Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                for (i in 1 until daysCount) {
+                                for (i in 1..<daysCount) {
                                     Spacer(modifier = Modifier.weight(1f))
                                     Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
                                 }
