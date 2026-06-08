@@ -1,5 +1,6 @@
 package si.uni_lj.fe.tnuv.memorymapp.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,10 +15,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
+import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
+import si.uni_lj.fe.tnuv.memorymapp.data.DataRepository
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.InputBg
 import si.uni_lj.fe.tnuv.memorymapp.ui.viewmodels.AuthViewModel
@@ -30,9 +35,15 @@ fun AccountSettingsScreen(
     onLogoutClick: () -> Unit,
     viewModel: AuthViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val currentUser by viewModel.currentUser.collectAsState()
     
+    val database = remember { AppDatabase.getDatabase(context) }
+    val repository = remember { DataRepository(database.locationDao()) }
+    
     var isEditing by remember { mutableStateOf(false) }
+    var isSyncing by remember { mutableStateOf(false) }
     
     var name by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -193,9 +204,37 @@ fun AccountSettingsScreen(
             Spacer(modifier = Modifier.height(12.dp))
             StatRow("Total photos and videos taken", "0") 
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
             if (!isEditing) {
+                // Sync Button
+                Button(
+                    onClick = {
+                        scope.launch {
+                            isSyncing = true
+                            repository.syncAllTrips()
+                            isSyncing = false
+                            Toast.makeText(context, "All data synced to cloud!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isSyncing) Color.Gray else Color(0xFF6E6EF7)
+                    ),
+                    enabled = !isSyncing
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                    } else {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sync data to Cloud", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Want to change your account? ", color = Color.Gray, fontSize = 14.sp)
                     TextButton(onClick = onLogoutClick, contentPadding = PaddingValues(0.dp)) {

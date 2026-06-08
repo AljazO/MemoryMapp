@@ -44,7 +44,7 @@ interface LocationDao {
 
     // Trip Methods
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTrip(trip: Trip)
+    suspend fun insertTrip(trip: Trip): Long
 
     @Update
     suspend fun updateTrip(trip: Trip)

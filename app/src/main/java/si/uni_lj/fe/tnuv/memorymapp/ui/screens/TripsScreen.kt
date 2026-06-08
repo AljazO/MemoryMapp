@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import si.uni_lj.fe.tnuv.memorymapp.data.AppDatabase
 import si.uni_lj.fe.tnuv.memorymapp.data.Trip
+import si.uni_lj.fe.tnuv.memorymapp.data.DataRepository
 import si.uni_lj.fe.tnuv.memorymapp.ui.components.verticalScrollbar
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientEnd
 import si.uni_lj.fe.tnuv.memorymapp.ui.theme.GradientStart
@@ -52,6 +53,7 @@ fun TripsScreen(
     val context = LocalContext.current
     val database = remember { AppDatabase.getDatabase(context) }
     val locationDao = database.locationDao()
+    val repository = remember { DataRepository(locationDao) }
     
     // Filter trips by userId
     val trips by locationDao.getAllTrips(userId).collectAsState(initial = emptyList())
@@ -159,27 +161,30 @@ fun TripsScreen(
                     },
                     onSave = { title, description, start, end ->
                         scope.launch {
-                            if (editingTrip != null) {
-                                locationDao.updateTrip(
-                                    editingTrip!!.copy(
-                                        title = title,
-                                        description = description,
-                                        startTime = start.timeInMillis,
-                                        endTime = end.timeInMillis
-                                        // userId remains the same
-                                    )
+                            val tripToSync = if (editingTrip != null) {
+                                val updatedTrip = editingTrip!!.copy(
+                                    title = title,
+                                    description = description,
+                                    startTime = start.timeInMillis,
+                                    endTime = end.timeInMillis
                                 )
+                                locationDao.updateTrip(updatedTrip)
+                                updatedTrip
                             } else {
-                                locationDao.insertTrip(
-                                    Trip(
-                                        userId = userId, // Assign current userId to new trip
-                                        title = title,
-                                        description = description,
-                                        startTime = start.timeInMillis,
-                                        endTime = end.timeInMillis
-                                    )
+                                val newTrip = Trip(
+                                    userId = userId,
+                                    title = title,
+                                    description = description,
+                                    startTime = start.timeInMillis,
+                                    endTime = end.timeInMillis
                                 )
+                                val newId = locationDao.insertTrip(newTrip)
+                                newTrip.copy(id = newId)
                             }
+                            
+                            // Synchronize to Firebase
+                            repository.syncTripToFirebase(tripToSync)
+
                             showEditor = false
                             editingTrip = null
                         }
